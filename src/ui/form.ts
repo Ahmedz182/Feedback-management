@@ -132,6 +132,8 @@ export class ReportForm {
   private readonly severityTypes: FeedbackType[];
   private severity: Severity | '';
   private sentiment: Sentiment | '';
+  private readonly body: HTMLElement;
+  private readonly footer: HTMLElement;
 
   constructor(private readonly config: FormConfig) {
     const { options, labels: l, handlers, draft } = config;
@@ -258,19 +260,18 @@ export class ReportForm {
         this.severityHint,
         h(
           'div',
-          { class: 'fb-chips', role: 'radiogroup' },
+          { class: 'fb-segments', role: 'radiogroup' },
           ...SEVERITIES.map((value) => {
             const button = h(
               'button',
               {
                 type: 'button',
-                class: `fb-chip fb-sev-${value}`,
+                class: `fb-chip fb-segment fb-sev-${value}`,
                 part: 'chip',
                 role: 'radio',
                 onclick: () => this.setSeverity(value),
               },
-              h('span', { class: 'fb-dot-sm' }),
-              h('span', { class: 'fb-chip-label' }),
+              h('span', { class: 'fb-segment-top' }, h('span', { class: 'fb-dot-sm' }), h('span', { class: 'fb-chip-label' })),
               h('span', { class: 'fb-chip-hint' }),
             );
             this.severityButtons.set(value, button);
@@ -430,14 +431,14 @@ export class ReportForm {
     // ---- footer
     this.error = h('p', { class: 'fb-error', role: 'alert', hidden: true });
     this.submit = h('button', { type: 'submit', class: 'fb-btn fb-btn-primary', part: 'submit' });
-    const footer = h(
+    const footer = (this.footer = h(
       'div',
       { class: 'fb-footer', part: 'footer' },
       this.error,
       h('span', { class: 'fb-spacer' }),
       h('button', { type: 'button', class: 'fb-btn fb-btn-ghost', part: 'button', onclick: () => handlers.onCancel() }, l.cancel),
       this.submit,
-    );
+    ));
 
     const expectedActual =
       this.expected && this.actual
@@ -447,9 +448,9 @@ export class ReportForm {
     const checklistRow = checklistBox ? this.section(l.checklist, null, checklistBox) : null;
     if (checklistRow) this.perType.push({ el: checklistRow, types: ['bug'] });
 
-    const body = h(
+    const body = (this.body = h(
       'div',
-      { class: 'fb-body', part: 'body' },
+      { class: 'fb-body', part: 'body', onscroll: () => this.syncScrollShadows() },
       this.screenshotButton || this.recordButton
         ? h('div', { class: 'fb-actions' }, this.screenshotButton, this.recordButton)
         : null,
@@ -479,7 +480,7 @@ export class ReportForm {
       this.email,
       anonymousRow,
       summaryRow,
-    );
+    ));
 
     this.form = h(
       'form',
@@ -544,12 +545,23 @@ export class ReportForm {
       };
       this.severityButtons.forEach((button, value) => {
         button.querySelector('.fb-chip-label')!.textContent = l[value];
-        button.querySelector('.fb-chip-hint')!.textContent = hints[value] ? `· ${hints[value]}` : '';
+        button.querySelector('.fb-chip-hint')!.textContent = hints[value];
       });
     }
     this.setSeverity(this.severity);
+    requestAnimationFrame(() => this.syncScrollShadows());
     this.submit.dataset.label = { bug: l.submitBug, feedback: l.submitFeedback, suggestion: l.submitSuggestion }[type];
     this.setSubmitting(false);
+  }
+
+  /**
+   * Shades the edge of the tabs and footer while there is more form above or
+   * below, so scrolled content reads as "continues" rather than cut off.
+   */
+  syncScrollShadows(): void {
+    const { scrollTop, clientHeight, scrollHeight } = this.body;
+    this.tabs?.classList.toggle('fb-raised', scrollTop > 2);
+    this.footer.classList.toggle('fb-raised', scrollTop + clientHeight < scrollHeight - 2);
   }
 
   get currentType(): FeedbackType {

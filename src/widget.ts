@@ -111,6 +111,7 @@ export class FeedbackWidget {
     this.refreshSummary();
     this.updateLauncher();
     this.els.form.focus();
+    this.els.form.syncScrollShadows();
     this.options.onOpen?.();
   }
 
