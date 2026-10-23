@@ -73,6 +73,8 @@
         user: { id: 'demo-user', name: 'Demo User' },
         metadata: { appVersion: '1.0.0' },
         pages: { exclude: ['/checkout'] },
+        areas: [{ label: 'Dashboard', match: '/' }, { label: 'Reports', match: '/reports' }, 'Billing'],
+        fields: { tags: ['exports', 'charts', 'customers', 'billing', 'performance'] },
         theme: new URLSearchParams(location.search).get('theme') ?? 'auto',
       });
 

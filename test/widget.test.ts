@@ -67,7 +67,7 @@ describe('FeedbackWidget', () => {
     widget.open('suggestion');
     expect($('input[type=email]')).toBeNull(); // known user email: no email field
 
-    const submit = $<HTMLButtonElement>('.fb-submit');
+    const submit = $<HTMLButtonElement>('button[type=submit]');
     expect(submit.disabled).toBe(true);
     type('  Add dark mode  ');
     expect(submit.disabled).toBe(false);

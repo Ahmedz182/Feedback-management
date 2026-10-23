@@ -8,7 +8,18 @@ import { Readable } from 'node:stream';
 
 const payload: FeedbackPayload = {
   type: 'bug',
+  title: 'Save button does nothing',
   message: 'Save button does nothing\nIt just spins.',
+  severity: 'high',
+  area: 'Settings',
+  tags: ['Billing Page'],
+  sentiment: 'frustrated',
+  expected: 'Settings are saved',
+  actual: 'Spinner forever',
+  checklist: [
+    { label: 'I can reproduce this consistently', checked: true },
+    { label: "I've tried a hard refresh", checked: false },
+  ],
   email: 'jane@acme.com',
   user: { id: 'u1', name: 'Jane' },
   metadata: { appVersion: '2.3.0' },
@@ -46,6 +57,7 @@ const payload: FeedbackPayload = {
   ],
   screenshot: new Blob(['png'], { type: 'image/png' }),
   video: new Blob(['webm'], { type: 'video/webm' }),
+  attachments: [new File(['jpg'], 'photo.jpg', { type: 'image/jpeg' })],
 };
 
 const request = () => new Request('http://localhost/api/feedback', { method: 'POST', body: toFormData(payload) });
@@ -88,6 +100,11 @@ describe('report formatting', () => {
     expect(markdown).toContain('Captured 1 console message and 3 API calls (2 failed)');
     expect(markdown).toContain('[error] TypeError: x is undefined');
     expect(markdown).toContain('"appVersion": "2.3.0"');
+    expect(markdown.startsWith('**Severity:** High · **Area:** Settings · **Tags:** Billing Page · **Feeling:** Frustrated')).toBe(true);
+    expect(markdown).toContain('## Expected behavior\nSettings are saved');
+    expect(markdown).toContain('## Actual behavior\nSpinner forever');
+    expect(markdown).toContain('- [x] I can reproduce this consistently');
+    expect(markdown).toContain("- [ ] I've tried a hard refresh");
   });
 });
 
@@ -109,15 +126,33 @@ describe('createFeedbackHandler', () => {
     const body = JSON.parse(createInit.body as string);
     expect(body).toMatchObject({
       name: '[Bug] Save button does nothing',
-      priority: 2,
-      tags: ['bug', 'feedback-widget'],
+      priority: 2, // from severity: high
+      tags: ['bug', 'feedback-widget', 'settings', 'billing-page'],
     });
     expect(body.markdown_content).toContain('Steps recorded during the video');
 
     const uploads = calls().slice(1);
-    expect(uploads.map(([url]) => url)).toEqual(Array(3).fill('https://api.clickup.com/api/v2/task/abc/attachment'));
+    expect(uploads.map(([url]) => url)).toEqual(Array(4).fill('https://api.clickup.com/api/v2/task/abc/attachment'));
     const names = uploads.map(([, init]) => ((init.body as FormData).get('attachment') as File).name);
-    expect(names).toEqual(['screenshot.png', 'recording.webm', 'feedback-details.json']);
+    expect(names).toEqual(['screenshot.png', 'recording.webm', 'photo.jpg', 'feedback-details.json']);
+  });
+
+  it('falls back to the configured ClickUp priority when no severity was picked', async () => {
+    const calls = mockFetch((url) => (url.endsWith('/task') ? { id: 't', url: 'u' } : {}));
+    const { severity, ...withoutSeverity } = payload;
+    void severity;
+    const req = new Request('http://localhost/', { method: 'POST', body: toFormData({ ...withoutSeverity, type: 'suggestion' }) });
+    await createFeedbackHandler({ clickup: { token: 't', listId: 'L', priority: { suggestion: 4 } } })(req);
+    expect(JSON.parse(calls()[0][1].body as string).priority).toBe(4);
+  });
+
+  it('shows severity, area and expected/actual in Slack', async () => {
+    const calls = mockFetch(() => new Response('ok'));
+    await createFeedbackHandler({ slack: { webhookUrl: 'https://hooks.slack.com/x' } })(request());
+    const blocks = JSON.stringify(JSON.parse(calls()[0][1].body as string).blocks);
+    expect(blocks).toContain('*Severity*\\nHigh');
+    expect(blocks).toContain('*Area*\\nSettings');
+    expect(blocks).toContain('Spinner forever');
   });
 
   it('includes failed API calls in the Slack message', async () => {
@@ -154,7 +189,7 @@ describe('createFeedbackHandler', () => {
     const urls = calls().map(([url]) => url);
     expect(urls[0]).toBe('https://slack.com/api/chat.postMessage');
     expect(JSON.parse(calls()[0][1].body as string).channel).toBe('CBUGS');
-    expect(urls.filter((u) => u.endsWith('getUploadURLExternal'))).toHaveLength(3);
+    expect(urls.filter((u) => u.endsWith('getUploadURLExternal'))).toHaveLength(4);
     const complete = calls().find(([url]) => url.endsWith('completeUploadExternal'))!;
     expect(JSON.parse(complete[1].body as string)).toMatchObject({ channel_id: 'C1', thread_ts: '111.222' });
   });

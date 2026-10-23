@@ -1,9 +1,9 @@
 import { annotate } from './capture/annotate';
+import { startBreadcrumbs, type BreadcrumbCapture } from './capture/breadcrumbs';
+import { startNetworkCapture, type NetworkCapture } from './capture/network';
 import { RecordingOverlay } from './capture/overlay';
 import { startRecording, isRecordingSupported, type Recording } from './capture/recorder';
 import { captureDisplay, captureDom, isDisplayCaptureSupported } from './capture/screenshot';
-import { startBreadcrumbs, type BreadcrumbCapture } from './capture/breadcrumbs';
-import { startNetworkCapture, type NetworkCapture } from './capture/network';
 import { startSessionTracking } from './capture/session';
 import { collectContext, startConsoleCapture, type ConsoleCapture } from './context';
 import { isPageAllowed } from './pages';
@@ -18,44 +18,15 @@ import type {
   RecordingEvent,
 } from './types';
 import { h, icon, nextFrame } from './ui/dom';
+import { ReportForm, type FormValues } from './ui/form';
 import { icons } from './ui/icons';
+import { DEFAULT_LABELS } from './ui/labels';
 import { styles } from './ui/styles';
+import { themeCss } from './ui/theme';
 
-export const DEFAULT_LABELS: FeedbackLabels = {
-  launcher: 'Feedback',
-  title: 'Send feedback',
-  bug: 'Bug',
-  feedback: 'Feedback',
-  suggestion: 'Suggestion',
-  placeholderBug: 'What went wrong? Steps to reproduce help a lot.',
-  placeholderFeedback: 'What do you think? We read everything.',
-  placeholderSuggestion: 'What would make this better for you?',
-  email: 'Your email (optional)',
-  screenshot: 'Screenshot',
-  record: 'Record screen',
-  stopRecording: 'Stop',
-  drawOnPage: 'Draw on the page',
-  clearDrawing: 'Clear drawings',
-  remove: 'Remove',
-  submit: 'Send',
-  sending: 'Sending…',
-  success: 'Thanks! Your feedback has been sent.',
-  error: 'Something went wrong. Please try again.',
-  close: 'Close',
-  annotateDraw: 'Draw',
-  annotateBox: 'Highlight area',
-  annotateHide: 'Hide sensitive info',
-  annotateUndo: 'Undo',
-  annotateCancel: 'Cancel',
-  annotateDone: 'Attach',
-};
+export { DEFAULT_LABELS };
 
 const ALL_TYPES: FeedbackType[] = ['feedback', 'bug', 'suggestion'];
-const TYPE_ICONS: Record<FeedbackType, string> = {
-  bug: icons.bug,
-  feedback: icons.feedback,
-  suggestion: icons.suggestion,
-};
 
 /** True when the user dismissed a browser permission / screen-share prompt. */
 const isUserCancel = (error: unknown) =>
@@ -67,20 +38,11 @@ const formatSeconds = (total: number) =>
 interface Elements {
   launcher: HTMLButtonElement;
   panel: HTMLElement;
-  form: HTMLFormElement;
+  form: ReportForm;
   success: HTMLElement;
-  typeButtons: Map<FeedbackType, HTMLButtonElement>;
-  message: HTMLTextAreaElement;
-  email: HTMLInputElement | null;
-  screenshotButton: HTMLButtonElement | null;
-  recordButton: HTMLButtonElement | null;
-  previews: HTMLElement;
-  error: HTMLElement;
-  submit: HTMLButtonElement;
   recordingBar: HTMLElement;
   timer: HTMLElement;
   drawButton: HTMLButtonElement | null;
-  clearButton: HTMLButtonElement | null;
 }
 
 export class FeedbackWidget {
@@ -93,6 +55,7 @@ export class FeedbackWidget {
   private type: FeedbackType;
   private screenshot: Blob | null = null;
   private video: Blob | null = null;
+  private files: File[] = [];
   private recordingEvents: RecordingEvent[] | null = null;
   private overlay: RecordingOverlay | null = null;
   private objectUrls: string[] = [];
@@ -140,12 +103,14 @@ export class FeedbackWidget {
   /** Opens the panel, optionally preselecting a feedback type. Works on any page, regardless of `pages` rules. */
   open(type?: FeedbackType): void {
     if (this.destroyed || !this.els || this.recording || this.capturing) return;
-    if (type && this.types().includes(type)) this.setType(type);
     if (!this.els.success.hidden) this.resetForm();
+    if (type && this.types().includes(type)) this.setType(type);
     this.isOpen = true;
     this.els.panel.hidden = false;
+    this.els.form.syncArea(new URL(location.href));
+    this.refreshSummary();
     this.updateLauncher();
-    this.els.message.focus();
+    this.els.form.focus();
     this.options.onOpen?.();
   }
 
@@ -219,8 +184,10 @@ export class FeedbackWidget {
     this.breadcrumbs?.stop();
     this.revokeObjectUrls();
     document.removeEventListener('keydown', this.onKeyDown);
+    window.removeEventListener('beforeunload', this.onBeforeUnload);
     this.host?.remove();
     this.host = this.root = this.els = null;
+    this.idleWaiters.splice(0).forEach((resolve) => resolve());
   }
 
   get opened(): boolean {
@@ -260,10 +227,9 @@ export class FeedbackWidget {
 
   private applyHostStyles() {
     if (!this.host) return;
-    const { zIndex = 2147483000, primaryColor, theme = 'light' } = this.options;
+    const { zIndex = 2147483000, theme = 'light' } = this.options;
     // A zero-size fixed host gives every fixed child one shared stacking context.
     this.host.style.cssText = `position:fixed;top:0;left:0;width:0;height:0;z-index:${zIndex};`;
-    if (primaryColor) this.host.style.setProperty('--fb-primary', primaryColor);
     this.host.setAttribute('data-theme', theme);
   }
 
@@ -346,19 +312,25 @@ export class FeedbackWidget {
   private setType(type: FeedbackType) {
     this.type = type;
     if (!this.els) return;
-    this.els.typeButtons.forEach((button, t) => button.setAttribute('aria-checked', String(t === type)));
-    this.els.message.placeholder = this.placeholder();
+    this.els.form.setType(type);
+    this.els.panel.setAttribute('data-type', type);
   }
 
-  private placeholder(): string {
-    const { placeholderBug, placeholderFeedback, placeholderSuggestion } = this.labels;
-    return { bug: placeholderBug, feedback: placeholderFeedback, suggestion: placeholderSuggestion }[this.type];
+  private refreshSummary() {
+    if (!this.els) return;
+    const logs = this.consoleCapture?.entries() ?? [];
+    const calls = this.networkCapture?.entries() ?? [];
+    this.els.form.updateSummary({
+      console: logs.length,
+      errors: logs.filter((entry) => entry.level === 'error').length,
+      network: calls.length,
+      failed: calls.filter((entry) => !entry.ok).length,
+      actions: this.breadcrumbs?.entries().length ?? 0,
+    });
   }
 
   private showError(message: string | null) {
-    if (!this.els) return;
-    this.els.error.textContent = message ?? '';
-    this.els.error.hidden = !message;
+    this.els?.form.showError(message);
   }
 
   private handleError(error: unknown) {
@@ -367,9 +339,11 @@ export class FeedbackWidget {
     this.options.onError?.(error);
   }
 
-  private clearVideo() {
+  private clearAttachments() {
+    this.screenshot = null;
     this.video = null;
     this.recordingEvents = null;
+    this.files = [];
   }
 
   private revokeObjectUrls() {
@@ -378,123 +352,56 @@ export class FeedbackWidget {
   }
 
   private resetForm() {
-    if (!this.els) return;
-    this.els.message.value = '';
-    this.screenshot = null;
-    this.clearVideo();
-    this.renderPreviews();
-    this.showError(null);
-    this.els.form.hidden = false;
-    this.els.success.hidden = true;
-    this.updateSubmit();
+    this.clearAttachments();
+    this.render(null);
   }
 
   private updateSubmit() {
-    if (!this.els) return;
-    const empty = this.els.message.value.trim().length === 0;
-    this.els.submit.disabled = empty || this.submitting;
-    this.els.submit.textContent = this.submitting ? this.labels.sending : this.labels.submit;
-    if (this.els.screenshotButton) this.els.screenshotButton.disabled = this.submitting;
-    if (this.els.recordButton) this.els.recordButton.disabled = this.submitting;
+    this.els?.form.setSubmitting(this.submitting);
   }
 
   // ---------------------------------------------------------------- rendering
 
-  private render() {
+  /** Builds the widget's DOM. `draft` restores what the user typed; it defaults to the current form's values. */
+  private render(draft: FormValues | null = this.els?.form.draft() ?? null) {
     if (!this.root) return;
     this.renderPending = false;
 
-    // Keep whatever the user has typed across re-renders.
-    const draft = this.els ? { message: this.els.message.value, email: this.els.email?.value ?? '' } : null;
     const position = this.options.position ?? 'bottom-right';
+    const shape = this.options.appearance?.launcher ?? 'pill';
     const l = this.labels;
 
     const launcher = h(
       'button',
-      { type: 'button', class: `fb-launcher ${position}`, 'aria-haspopup': 'dialog', onclick: () => this.open() },
+      {
+        type: 'button',
+        class: `fb-launcher fb-launcher-${shape} ${position}`,
+        part: 'launcher',
+        'aria-haspopup': 'dialog',
+        'aria-label': l.launcher,
+        onclick: () => this.open(),
+      },
       icon(icons.chat),
-      l.launcher,
+      shape === 'circle' ? null : h('span', {}, l.launcher),
     );
 
-    const typeButtons = new Map<FeedbackType, HTMLButtonElement>();
-    const types = this.types();
-    const typeRow =
-      types.length > 1
-        ? h(
-            'div',
-            { class: 'fb-types', role: 'radiogroup', 'aria-label': l.title },
-            ...types.map((type) => {
-              const button = h(
-                'button',
-                {
-                  type: 'button',
-                  class: 'fb-type',
-                  role: 'radio',
-                  'aria-checked': String(type === this.type),
-                  onclick: () => this.setType(type),
-                },
-                icon(TYPE_ICONS[type]),
-                l[type],
-              );
-              typeButtons.set(type, button);
-              return button;
-            }),
-          )
-        : null;
-
-    const message = h('textarea', {
-      class: 'fb-input',
-      name: 'message',
-      'aria-label': l.title,
-      placeholder: this.placeholder(),
-      required: true,
-      oninput: () => this.updateSubmit(),
-      onkeydown: (event: Event) => {
-        const e = event as KeyboardEvent;
-        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-          e.preventDefault();
-          form.requestSubmit();
-        }
+    const form = new ReportForm({
+      options: this.options,
+      labels: l,
+      types: this.types(),
+      type: this.type,
+      canRecord: isRecordingSupported(),
+      draft,
+      handlers: {
+        onInput: () => this.updateSubmit(),
+        onSubmit: () => void this.submit(),
+        onCancel: () => this.close(),
+        onTypeChange: (type) => this.setType(type),
+        onScreenshot: () => void this.takeScreenshot(),
+        onRecord: () => void this.record(),
+        onFiles: (files) => this.addFiles(files),
       },
     });
-    message.value = draft?.message ?? '';
-
-    const email =
-      this.feature('email') && !this.options.user?.email
-        ? h('input', { class: 'fb-input', type: 'email', name: 'email', placeholder: l.email, 'aria-label': l.email, autocomplete: 'email' })
-        : null;
-    if (email) email.value = draft?.email ?? '';
-
-    const screenshotButton = this.feature('screenshot')
-      ? h('button', { type: 'button', class: 'fb-btn', onclick: () => this.takeScreenshot() }, icon(icons.camera), l.screenshot)
-      : null;
-    const recordButton =
-      this.feature('video') && isRecordingSupported()
-        ? h('button', { type: 'button', class: 'fb-btn', onclick: () => this.record() }, icon(icons.video), l.record)
-        : null;
-
-    const previews = h('div', { class: 'fb-previews' });
-    const error = h('p', { class: 'fb-error', role: 'alert', hidden: true });
-    const submit = h('button', { type: 'submit', class: 'fb-btn fb-btn-primary fb-submit' }, l.submit);
-
-    const form = h(
-      'form',
-      {
-        class: 'fb-body',
-        novalidate: true,
-        onsubmit: (event: Event) => {
-          event.preventDefault();
-          void this.submit();
-        },
-      },
-      typeRow,
-      message,
-      email,
-      screenshotButton || recordButton ? h('div', { class: 'fb-actions' }, screenshotButton, recordButton) : null,
-      previews,
-      error,
-      submit,
-    );
 
     const success = h(
       'div',
@@ -506,14 +413,23 @@ export class FeedbackWidget {
 
     const panel = h(
       'div',
-      { class: `fb-panel ${position}`, role: 'dialog', 'aria-label': l.title, hidden: !this.isOpen },
+      {
+        class: `fb-panel ${position}`,
+        part: 'panel',
+        role: 'dialog',
+        'aria-label': l.title,
+        'data-type': this.type,
+        hidden: !this.isOpen,
+      },
       h(
         'div',
-        { class: 'fb-header' },
-        h('h2', {}, l.title),
+        { class: 'fb-header', part: 'header' },
+        h('div', {}, h('div', { class: 'fb-eyebrow' }, l.eyebrow), h('h2', {}, l.title)),
+        h('kbd', { class: 'fb-kbd fb-esc' }, 'Esc'),
         h('button', { type: 'button', class: 'fb-close', 'aria-label': l.close, onclick: () => this.close() }, icon(icons.close)),
       ),
-      form,
+      form.tabs,
+      form.form,
       success,
     );
 
@@ -534,7 +450,7 @@ export class FeedbackWidget {
       : null;
     const recordingBar = h(
       'div',
-      { class: 'fb-recording', hidden: true, role: 'toolbar', 'aria-label': l.record },
+      { class: 'fb-recording', part: 'recording-bar', hidden: true, role: 'toolbar', 'aria-label': l.record },
       h('span', { class: 'fb-dot' }),
       timer,
       drawButton,
@@ -542,26 +458,9 @@ export class FeedbackWidget {
       h('button', { type: 'button', class: 'fb-btn fb-stop', onclick: () => this.recording?.stop() }, l.stopRecording),
     );
 
-    const style = h('style', {}, styles);
-    this.root.replaceChildren(style, launcher, panel, recordingBar);
-    this.els = {
-      launcher,
-      panel,
-      form,
-      success,
-      typeButtons,
-      message,
-      email,
-      screenshotButton,
-      recordButton,
-      previews,
-      error,
-      submit,
-      recordingBar,
-      timer,
-      drawButton,
-      clearButton,
-    };
+    const css = styles + themeCss(this.options.appearance, this.options.primaryColor) + (this.options.customCss ?? '');
+    this.root.replaceChildren(h('style', {}, css), launcher, panel, recordingBar);
+    this.els = { launcher, panel, form, success, recordingBar, timer, drawButton };
     this.renderPreviews();
     this.updateSubmit();
     this.updateLauncher();
@@ -570,46 +469,95 @@ export class FeedbackWidget {
   private renderPreviews() {
     if (!this.els) return;
     this.revokeObjectUrls();
+    const l = this.labels;
     const items: HTMLElement[] = [];
-    const removeButton = (onRemove: () => void) =>
+    const preview = (media: HTMLElement, onRemove: () => void, onEdit?: () => void) =>
       h(
-        'button',
-        { type: 'button', class: 'fb-preview-remove', 'aria-label': this.labels.remove, title: this.labels.remove, onclick: onRemove },
-        icon(icons.close),
+        'div',
+        { class: 'fb-preview' },
+        media,
+        h('button', { type: 'button', class: 'fb-preview-btn fb-preview-remove', 'aria-label': l.remove, title: l.remove, onclick: onRemove }, icon(icons.close)),
+        onEdit
+          ? h('button', { type: 'button', class: 'fb-preview-btn fb-preview-edit', 'aria-label': l.edit, title: l.edit, onclick: onEdit }, icon(icons.pen))
+          : null,
       );
+    const url = (blob: Blob) => {
+      const created = URL.createObjectURL(blob);
+      this.objectUrls.push(created);
+      return created;
+    };
 
     if (this.screenshot) {
-      const url = URL.createObjectURL(this.screenshot);
-      this.objectUrls.push(url);
+      const shot = this.screenshot;
       items.push(
-        h(
-          'div',
-          { class: 'fb-preview' },
-          h('img', { src: url, alt: this.labels.screenshot }),
-          removeButton(() => {
+        preview(
+          h('img', { src: url(shot), alt: l.screenshot }),
+          () => {
             this.screenshot = null;
             this.renderPreviews();
-          }),
+          },
+          () => void this.editImage(shot, (edited) => (this.screenshot = edited)),
         ),
       );
     }
     if (this.video) {
-      const url = URL.createObjectURL(this.video);
-      this.objectUrls.push(url);
       items.push(
-        h(
-          'div',
-          { class: 'fb-preview' },
-          h('video', { src: url, muted: true, playsinline: true, preload: 'metadata', 'aria-label': this.labels.record }),
-          removeButton(() => {
-            this.clearVideo();
-            this.renderPreviews();
-          }),
-        ),
+        preview(h('video', { src: url(this.video), muted: true, playsinline: true, preload: 'metadata', 'aria-label': l.record }), () => {
+          this.video = null;
+          this.recordingEvents = null;
+          this.renderPreviews();
+        }),
       );
     }
-    this.els.previews.replaceChildren(...items);
-    this.els.previews.hidden = items.length === 0;
+    this.files.forEach((file, index) => {
+      const isImage = file.type.startsWith('image/');
+      const media = isImage
+        ? h('img', { src: url(file), alt: file.name })
+        : h('video', { src: url(file), muted: true, playsinline: true, preload: 'metadata', 'aria-label': file.name });
+      items.push(
+        preview(
+          media,
+          () => {
+            this.files.splice(index, 1);
+            this.renderPreviews();
+          },
+          isImage
+            ? () =>
+                void this.editImage(file, (edited) => {
+                  this.files[index] = new File([edited], file.name.replace(/\.\w+$/, '') + '.png', { type: 'image/png' });
+                })
+            : undefined,
+        ),
+      );
+    });
+    this.els.form.previews.replaceChildren(...items);
+    this.els.form.previews.hidden = items.length === 0;
+  }
+
+  /** Adds dropped/pasted/picked image and video files, within the size limit. */
+  private addFiles(files: File[]) {
+    const accepted = files.filter((file) => /^(image|video)\//.test(file.type));
+    const limitMb = this.options.maxAttachmentMB ?? 25;
+    const total = [...this.files, ...accepted].reduce((sum, file) => sum + file.size, 0);
+    if (total > limitMb * 1024 * 1024) {
+      this.showError(this.labels.fileTooLarge.replace('{mb}', String(limitMb)));
+      return;
+    }
+    this.showError(null);
+    this.files.push(...accepted);
+    this.renderPreviews();
+  }
+
+  private async editImage(image: Blob, apply: (edited: Blob) => void) {
+    if (!this.root || !this.els) return;
+    this.els.panel.hidden = true;
+    try {
+      const edited = await annotate(this.root, image, this.labels);
+      if (edited) apply(edited);
+    } finally {
+      if (this.els) this.els.panel.hidden = !this.isOpen;
+      this.renderPreviews();
+    }
   }
 
   // ------------------------------------------------------------------ capture
@@ -710,6 +658,7 @@ export class FeedbackWidget {
       // Bring the report back even if the user navigated somewhere the launcher is hidden.
       this.isOpen = true;
       this.els.panel.hidden = false;
+      this.refreshSummary();
       this.updateLauncher();
     }
     this.idleWaiters.splice(0).forEach((resolve) => resolve());
@@ -717,29 +666,43 @@ export class FeedbackWidget {
 
   // ------------------------------------------------------------------- submit
 
-  private buildPayload(): FeedbackPayload {
+  private buildPayload(values: FormValues): FeedbackPayload {
     const { user, metadata } = this.options;
-    const email = this.els?.email?.value.trim() || user?.email || undefined;
     const payload: FeedbackPayload = {
       type: this.type,
-      message: this.els?.message.value.trim() ?? '',
+      title: values.title || values.message.split('\n')[0].slice(0, 80),
+      message: values.message,
       context: collectContext(),
     };
-    if (email) payload.email = email;
-    if (user) payload.user = user;
+    if (values.severity) payload.severity = values.severity;
+    if (values.area) payload.area = values.area;
+    if (values.component) payload.component = values.component;
+    if (values.expected) payload.expected = values.expected;
+    if (values.actual) payload.actual = values.actual;
+    if (values.checklist.length) payload.checklist = values.checklist;
+    if (values.tags.length) payload.tags = values.tags;
+    if (values.sentiment) payload.sentiment = values.sentiment;
+    if (values.anonymous) {
+      payload.anonymous = true;
+    } else {
+      const email = values.email || user?.email;
+      if (email) payload.email = email;
+      if (user) payload.user = user;
+    }
     const resolvedMetadata = typeof metadata === 'function' ? metadata() : metadata;
     if (resolvedMetadata) payload.metadata = resolvedMetadata;
-    if (this.consoleCapture) payload.consoleLogs = this.consoleCapture.entries();
-    if (this.networkCapture) payload.networkLogs = this.networkCapture.entries();
-    if (this.breadcrumbs) payload.breadcrumbs = this.breadcrumbs.entries();
+    if (this.consoleCapture && values.include.console) payload.consoleLogs = this.consoleCapture.entries();
+    if (this.networkCapture && values.include.network) payload.networkLogs = this.networkCapture.entries();
+    if (this.breadcrumbs && values.include.actions) payload.breadcrumbs = this.breadcrumbs.entries();
     if (this.screenshot) payload.screenshot = this.screenshot;
     if (this.video) payload.video = this.video;
     if (this.video && this.recordingEvents) payload.recordingEvents = this.recordingEvents;
+    if (this.files.length) payload.attachments = this.files.slice();
     return payload;
   }
 
   private async submit() {
-    if (!this.els || this.submitting || this.els.message.value.trim().length === 0) return;
+    if (!this.els || this.submitting || !this.els.form.isValid()) return;
     const { onSubmit, endpoint, headers } = this.options;
     if (!onSubmit && !endpoint) {
       console.warn('[feedback-management] Set `endpoint` or `onSubmit` to receive submissions.');
@@ -749,18 +712,16 @@ export class FeedbackWidget {
     this.showError(null);
     this.updateSubmit();
     try {
-      const payload = this.buildPayload();
+      const payload = this.buildPayload(this.els.form.values());
       await onSubmit?.(payload);
       if (endpoint) {
         await postFeedback(endpoint, payload, typeof headers === 'function' ? headers() : headers);
       }
-      if (this.destroyed) return;
-      this.els.form.hidden = true;
+      if (this.destroyed || !this.els) return;
+      this.clearAttachments();
+      this.els.form.form.hidden = true;
+      this.els.form.tabs?.setAttribute('hidden', '');
       this.els.success.hidden = false;
-      this.els.message.value = '';
-      this.screenshot = null;
-      this.clearVideo();
-      this.renderPreviews();
     } catch (error) {
       this.showError(this.labels.error);
       this.options.onError?.(error);

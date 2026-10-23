@@ -1,5 +1,6 @@
 import type { FeedbackType } from '../types';
 import {
+  reportFacts,
   describeBreadcrumb,
   describeRequest,
   describeSteps,
@@ -40,12 +41,24 @@ const clip = (text: string, max = MAX_SECTION) => (text.length > max ? `${text.s
 export function slackBlocks(feedback: ParsedFeedback): unknown[] {
   const { payload } = feedback;
   const { context, user } = payload;
-  const reporter = [user?.name, payload.email ?? user?.email].filter(Boolean).join(' · ') || 'Anonymous';
+  const reporter = payload.anonymous
+    ? 'Anonymous'
+    : [user?.name, payload.email ?? user?.email].filter(Boolean).join(' · ') || 'Anonymous';
+  const facts = reportFacts(payload);
   const blocks: unknown[] = [
     {
       type: 'section',
       text: { type: 'mrkdwn', text: clip(`*${TYPE_EMOJI[payload.type]} ${esc(reportTitle(payload))}*\n\n${esc(payload.message)}`) },
     },
+    ...(facts.length
+      ? [{ type: 'section', fields: facts.map(([key, value]) => ({ type: 'mrkdwn', text: `*${key}*\n${esc(value)}` })) }]
+      : []),
+    ...(payload.expected || payload.actual
+      ? [{
+          type: 'section',
+          text: { type: 'mrkdwn', text: clip(`*Expected*\n${esc(payload.expected || '—')}\n*Actual*\n${esc(payload.actual || '—')}`) },
+        }]
+      : []),
     {
       type: 'context',
       elements: [

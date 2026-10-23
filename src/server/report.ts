@@ -1,10 +1,12 @@
-import type { Breadcrumb, FeedbackPayload, FeedbackType, NetworkEntry, RecordingEvent } from '../types';
+import type { Breadcrumb, FeedbackPayload, FeedbackType, NetworkEntry, RecordingEvent, Severity } from '../types';
 
 /** A submission as received by the server: the JSON payload plus uploaded files. */
 export interface ParsedFeedback {
-  payload: Omit<FeedbackPayload, 'screenshot' | 'video'>;
+  payload: Omit<FeedbackPayload, 'screenshot' | 'video' | 'attachments'>;
   screenshot?: File;
   video?: File;
+  /** Files the user dropped, pasted or picked. */
+  attachments?: File[];
 }
 
 export interface ReportAttachment {
@@ -37,14 +39,33 @@ export async function parseFeedback(request: Request): Promise<ParsedFeedback> {
     const value = form.get(name);
     return value instanceof File && value.size > 0 ? value : undefined;
   };
-  return { payload, screenshot: file('screenshot'), video: file('video') };
+  const attachments = form.getAll('attachment').filter((v): v is File => v instanceof File && v.size > 0);
+  return { payload, screenshot: file('screenshot'), video: file('video'), attachments };
 }
 
-/** One-line title: `[Bug] First line of the message`. */
+export const SEVERITY_LABELS: Record<Severity, string> = {
+  critical: 'Critical',
+  high: 'High',
+  medium: 'Medium',
+  low: 'Low',
+};
+
+/** One-line title: `[Bug] The user's title`, or the first line of the message when there is none. */
 export function reportTitle(payload: ParsedFeedback['payload'], maxLength = 80): string {
-  const firstLine = payload.message.split('\n')[0].trim();
-  const text = firstLine.length > maxLength ? `${firstLine.slice(0, maxLength)}…` : firstLine;
+  const source = payload.title?.trim() || payload.message.split('\n')[0].trim();
+  const text = source.length > maxLength ? `${source.slice(0, maxLength)}…` : source;
   return `[${TYPE_LABELS[payload.type]}] ${text}`;
+}
+
+/** `Severity: High · Area: Dashboard · Component: Composer · Tags: billing, search · Feeling: Frustrated` */
+export function reportFacts(payload: ParsedFeedback['payload']): [string, string][] {
+  const facts: [string, string][] = [];
+  if (payload.severity) facts.push([payload.type === 'bug' ? 'Severity' : 'Priority', SEVERITY_LABELS[payload.severity]]);
+  if (payload.area) facts.push(['Area', payload.area]);
+  if (payload.component) facts.push(['Component', payload.component]);
+  if (payload.tags?.length) facts.push(['Tags', payload.tags.join(', ')]);
+  if (payload.sentiment) facts.push(['Feeling', payload.sentiment[0].toUpperCase() + payload.sentiment.slice(1)]);
+  return facts;
 }
 
 export function formatTime(ms: number): string {
@@ -114,6 +135,7 @@ export function describeRequest(entry: NetworkEntry): string {
 const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
 
 function reporterLine(payload: ParsedFeedback['payload']): string {
+  if (payload.anonymous) return 'Anonymous (chose not to share their identity)';
   const { user, email } = payload;
   const parts = [user?.name, email ?? user?.email, user?.id ? `id ${user.id}` : undefined].filter(Boolean);
   return parts.length ? parts.join(' · ') : 'Anonymous';
@@ -123,8 +145,18 @@ function reporterLine(payload: ParsedFeedback['payload']): string {
 export function reportMarkdown(feedback: ParsedFeedback): string {
   const { payload } = feedback;
   const { context } = payload;
+  const facts = reportFacts(payload);
   const lines = [
+    ...(facts.length ? [facts.map(([key, value]) => `**${key}:** ${value}`).join(' · '), ''] : []),
     payload.message,
+  ];
+  if (payload.expected || payload.actual) {
+    lines.push('', '## Expected behavior', payload.expected || '_Not provided_', '', '## Actual behavior', payload.actual || '_Not provided_');
+  }
+  if (payload.checklist?.length) {
+    lines.push('', '## Checklist', ...payload.checklist.map((item) => `- [${item.checked ? 'x' : ' '}] ${item.label}`));
+  }
+  lines.push(
     '',
     '## Reporter',
     reporterLine(payload),
@@ -138,7 +170,7 @@ export function reportMarkdown(feedback: ParsedFeedback): string {
     `- **Viewport:** ${context.viewport.width}×${context.viewport.height} (screen ${context.screen.width}×${context.screen.height} @${context.screen.pixelRatio}x)`,
     `- **Language / timezone:** ${context.language} / ${context.timezone || 'unknown'}`,
     `- **Reported at:** ${context.timestamp}`,
-  ];
+  );
 
   const steps = describeSteps(payload.recordingEvents);
   if (steps.length) {
@@ -186,7 +218,11 @@ export function reportMarkdown(feedback: ParsedFeedback): string {
     lines.push('', '## Metadata', '```json', JSON.stringify(payload.metadata, null, 2), '```');
   }
 
-  const attached = [feedback.screenshot && 'screenshot', feedback.video && 'screen recording'].filter(Boolean);
+  const attached = [
+    feedback.screenshot && 'screenshot',
+    feedback.video && 'screen recording',
+    feedback.attachments?.length && `${feedback.attachments.length} uploaded file(s)`,
+  ].filter(Boolean);
   if (attached.length) lines.push('', `_Attached: ${attached.join(', ')}._`);
   return lines.join('\n');
 }
@@ -196,6 +232,7 @@ export function reportAttachments(feedback: ParsedFeedback): ReportAttachment[] 
   const files: ReportAttachment[] = [];
   if (feedback.screenshot) files.push({ filename: feedback.screenshot.name || 'screenshot.png', data: feedback.screenshot });
   if (feedback.video) files.push({ filename: feedback.video.name || 'recording.webm', data: feedback.video });
+  feedback.attachments?.forEach((file, i) => files.push({ filename: file.name || `attachment-${i + 1}`, data: file }));
   const { consoleLogs, networkLogs, breadcrumbs, recordingEvents, context } = feedback.payload;
   if (consoleLogs?.length || networkLogs?.length || breadcrumbs?.length || recordingEvents?.length) {
     const details = { context, breadcrumbs, consoleLogs, networkLogs, recordingEvents };

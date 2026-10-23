@@ -1,5 +1,3 @@
-import { toCanvas } from 'html-to-image';
-
 const TRANSPARENT_PIXEL =
   'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
@@ -22,6 +20,8 @@ function pageBackground(): string {
  * `exclude` (the widget's own host element) is left out of the image.
  */
 export async function captureDom(exclude?: Element): Promise<Blob> {
+  // Loaded on first use, so apps that never take a screenshot don't download it.
+  const { toCanvas } = await import('html-to-image');
   const canvas = await toCanvas(document.documentElement, {
     width: window.innerWidth,
     height: window.innerHeight,

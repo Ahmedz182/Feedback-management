@@ -1,4 +1,9 @@
-import type { FeedbackType } from '../types';
+import type { FeedbackType, Severity } from '../types';
+
+const SEVERITY_PRIORITY: Record<Severity, 1 | 2 | 3 | 4> = { critical: 1, high: 2, medium: 3, low: 4 };
+
+/** Lowercase, hyphenated tag (ClickUp tags are case-insensitive and short). */
+const toTag = (value: string) => value.trim().toLowerCase().replace(/\s+/g, '-').slice(0, 40);
 import { reportAttachments, reportMarkdown, reportTitle, type ParsedFeedback } from './report';
 
 export interface ClickUpOptions {
@@ -8,8 +13,13 @@ export interface ClickUpOptions {
   listId: string;
   /** Use a different list per feedback type, e.g. bugs into the engineering backlog. */
   listByType?: Partial<Record<FeedbackType, string>>;
-  /** ClickUp priority per type: 1 urgent, 2 high, 3 normal, 4 low. */
+  /**
+   * ClickUp priority per type (1 urgent, 2 high, 3 normal, 4 low). Used when the
+   * user picked no severity; otherwise severity maps critical→1, high→2, medium→3, low→4.
+   */
   priority?: Partial<Record<FeedbackType, 1 | 2 | 3 | 4>>;
+  /** Turn off the severity → priority mapping. Default `true`. */
+  priorityFromSeverity?: boolean;
   /** Tags added to every task, in addition to the feedback type. Default `['feedback-widget']`. */
   tags?: string[];
   /** ClickUp user IDs to assign. */
@@ -27,14 +37,15 @@ const CLICKUP_API = 'https://api.clickup.com/api/v2';
 
 /** Creates a ClickUp task for a report and uploads the screenshot, video and details file as attachments. */
 export async function createClickUpTask(feedback: ParsedFeedback, options: ClickUpOptions): Promise<ClickUpResult> {
-  const { type } = feedback.payload;
+  const { type, severity, area, tags } = feedback.payload;
   const listId = options.listByType?.[type] ?? options.listId;
   const body: Record<string, unknown> = {
     name: reportTitle(feedback.payload, 120),
     markdown_content: reportMarkdown(feedback),
-    tags: [type, ...(options.tags ?? ['feedback-widget'])],
+    tags: [...new Set([type, ...(options.tags ?? ['feedback-widget']), ...(area ? [toTag(area)] : []), ...(tags ?? []).map(toTag)])],
   };
-  const priority = options.priority?.[type];
+  const priority =
+    severity && options.priorityFromSeverity !== false ? SEVERITY_PRIORITY[severity] : options.priority?.[type];
   if (priority) body.priority = priority;
   if (options.assignees?.length) body.assignees = options.assignees;
   if (options.status) body.status = options.status;

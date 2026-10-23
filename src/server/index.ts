@@ -3,7 +3,7 @@ import { parseFeedback, type ParsedFeedback } from './report';
 import { sendToSlack, type SlackOptions, type SlackResult } from './slack';
 
 export { createClickUpTask, sendToSlack, parseFeedback };
-export { describeBreadcrumb, describeRequest, describeSteps, failedRequests, reportAttachments, reportMarkdown, reportTitle } from './report';
+export { reportFacts, describeBreadcrumb, describeRequest, describeSteps, failedRequests, reportAttachments, reportMarkdown, reportTitle } from './report';
 export { slackBlocks } from './slack';
 export type { ClickUpOptions, ClickUpResult, ParsedFeedback, SlackOptions, SlackResult };
 export type * from '../types';
