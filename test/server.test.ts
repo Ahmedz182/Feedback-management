@@ -15,6 +15,8 @@ const payload: FeedbackPayload = {
   context: {
     url: 'https://app.acme.com/settings',
     path: '/settings',
+    query: { tab: 'billing' },
+    hash: '',
     title: 'Settings',
     referrer: '',
     userAgent: 'Mozilla/5.0 Test',
@@ -25,12 +27,21 @@ const payload: FeedbackPayload = {
     timestamp: '2026-10-23T10:00:00.000Z',
   },
   consoleLogs: [{ level: 'error', message: 'TypeError: x is undefined', timestamp: '2026-10-23T09:59:00.000Z' }],
+  networkLogs: [
+    { type: 'fetch', method: 'GET', url: 'https://api.acme.com/api/ok', status: 200, ok: true, duration: 40, timestamp: '2026-10-23T09:58:00.000Z' },
+    { type: 'xhr', method: 'POST', url: 'https://api.acme.com/save', status: 500, ok: false, duration: 231, timestamp: '2026-10-23T09:58:41.000Z', responseBody: '{"error":"db down"}' },
+    { type: 'fetch', method: 'GET', url: 'https://api.acme.com/me', ok: false, duration: 12, timestamp: '2026-10-23T09:58:42.000Z', error: 'Failed to fetch' },
+  ],
+  breadcrumbs: [
+    { type: 'navigation', timestamp: '2026-10-23T09:58:10.000Z', url: 'https://app.acme.com/settings', path: '/settings', title: 'Settings' },
+    { type: 'click', timestamp: '2026-10-23T09:58:40.000Z', url: 'https://app.acme.com/settings', path: '/settings', title: 'Settings', target: 'button#save', text: 'Save' },
+  ],
   recordingEvents: [
-    { type: 'navigation', t: 0, url: 'https://app.acme.com/settings' },
+    { type: 'navigation', t: 0, url: 'https://app.acme.com/settings', title: 'Settings' },
     { type: 'pointer', t: 100, x: 10, y: 10 },
     { type: 'scroll', t: 1000, x: 0, y: 100 },
     { type: 'scroll', t: 1300, x: 0, y: 400 },
-    { type: 'click', t: 2500, x: 50, y: 60, target: 'button#save', text: 'Save' },
+    { type: 'click', t: 2500, x: 50, y: 60, target: 'button#save', text: 'Save', path: '/settings?tab=billing', title: 'Settings' },
     { type: 'annotation', t: 4000, points: [[1, 1], [2, 2]] },
   ],
   screenshot: new Blob(['png'], { type: 'image/png' }),
@@ -56,7 +67,7 @@ describe('report formatting', () => {
     expect(describeSteps(payload.recordingEvents)).toEqual([
       '0:00 Started on https://app.acme.com/settings',
       '0:01 Scrolled to y=400',
-      '0:02 Clicked "Save" (button#save)',
+      '0:02 Clicked "Save" (button#save) on /settings?tab=billing',
       '0:04 Drew on the page',
     ]);
   });
@@ -65,8 +76,16 @@ describe('report formatting', () => {
     const { screenshot, video, ...rest } = payload;
     const markdown = reportMarkdown({ payload: rest, screenshot: screenshot as File, video: video as File });
     expect(markdown).toContain('Jane · jane@acme.com · id u1');
-    expect(markdown).toContain('- **Page:** https://app.acme.com/settings');
-    expect(markdown).toContain('3. 0:02 Clicked "Save" (button#save)');
+    expect(markdown).toContain('- **Page:** Settings · https://app.acme.com/settings');
+    expect(markdown).toContain('- **Route:** /settings · query {"tab":"billing"}');
+    expect(markdown).toContain('3. 0:02 Clicked "Save" (button#save) on /settings?tab=billing');
+    expect(markdown).toContain('- 09:58:10 Opened /settings · Settings');
+    expect(markdown).toContain('- 09:58:40 Clicked "Save" (button#save) on /settings · Settings');
+    expect(markdown).toContain('- `POST https://api.acme.com/save → 500 (231 ms)`');
+    expect(markdown).toContain('- `GET https://api.acme.com/me → Failed to fetch (12 ms)`');
+    expect(markdown).not.toContain('/api/ok');
+    expect(markdown).toContain('{"error":"db down"}');
+    expect(markdown).toContain('Captured 1 console message and 3 API calls (2 failed)');
     expect(markdown).toContain('[error] TypeError: x is undefined');
     expect(markdown).toContain('"appVersion": "2.3.0"');
   });
@@ -99,6 +118,14 @@ describe('createFeedbackHandler', () => {
     expect(uploads.map(([url]) => url)).toEqual(Array(3).fill('https://api.clickup.com/api/v2/task/abc/attachment'));
     const names = uploads.map(([, init]) => ((init.body as FormData).get('attachment') as File).name);
     expect(names).toEqual(['screenshot.png', 'recording.webm', 'feedback-details.json']);
+  });
+
+  it('includes failed API calls in the Slack message', async () => {
+    const calls = mockFetch(() => new Response('ok'));
+    await createFeedbackHandler({ slack: { webhookUrl: 'https://hooks.slack.com/x' } })(request());
+    const blocks = JSON.stringify(JSON.parse(calls()[0][1].body as string).blocks);
+    expect(blocks).toContain('Failed API calls (2)');
+    expect(blocks).toContain('POST https://api.acme.com/save → 500 (231 ms)');
   });
 
   it('posts to a Slack webhook', async () => {

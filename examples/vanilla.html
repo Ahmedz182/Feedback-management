@@ -77,14 +77,18 @@
       });
 
       document.getElementById('report-bug').addEventListener('click', () => FeedbackWidget.open('bug'));
-      document.getElementById('export').addEventListener('click', () => {
-        console.error('Export failed: TypeError: Cannot read properties of undefined (reading "rows")');
+      // A deliberately broken feature, so reports show a failed API call and a console error.
+      document.getElementById('export').addEventListener('click', async () => {
+        const response = await fetch('/api/export?format=csv', { method: 'POST' });
+        if (!response.ok) console.error('Export failed with status', response.status);
       });
 
       // Minimal client-side router, standing in for React Router / Vue Router / Next.js.
       const titles = { '/': 'Dashboard', '/reports': 'Reports', '/checkout': 'Billing' };
       function render() {
-        document.getElementById('title').textContent = titles[location.pathname] ?? 'Not found';
+        const title = titles[location.pathname] ?? 'Not found';
+        document.getElementById('title').textContent = title;
+        document.title = `${title} · Acme Analytics`;
         document.querySelectorAll('nav a').forEach((a) => {
           if (a.getAttribute('href') === location.pathname) a.setAttribute('aria-current', 'page');
           else a.removeAttribute('aria-current');

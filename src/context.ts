@@ -10,6 +10,8 @@ export function collectContext(): FeedbackContext {
   return {
     url: location.href,
     path: location.pathname,
+    query: Object.fromEntries(new URLSearchParams(location.search)),
+    hash: location.hash,
     title: document.title,
     referrer: document.referrer,
     userAgent: navigator.userAgent,
@@ -22,7 +24,7 @@ export function collectContext(): FeedbackContext {
 }
 
 const MAX_MESSAGE_LENGTH = 2000;
-const LEVELS = ['log', 'info', 'warn', 'error'] as const;
+const LEVELS = ['debug', 'log', 'info', 'warn', 'error'] as const;
 
 function stringify(value: unknown): string {
   if (typeof value === 'string') return value;
@@ -47,7 +49,7 @@ export interface ConsoleCapture {
 }
 
 /** Records the last `limit` console messages and uncaught errors without altering console output. */
-export function startConsoleCapture(limit = 50): ConsoleCapture {
+export function startConsoleCapture(limit = 200): ConsoleCapture {
   const buffer: ConsoleEntry[] = [];
   const push = (level: ConsoleEntry['level'], args: unknown[]) => {
     const message = args.map(stringify).join(' ');

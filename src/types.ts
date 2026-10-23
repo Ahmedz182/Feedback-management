@@ -31,8 +31,12 @@ export interface FeedbackFeatures {
   video?: boolean;
   /** Ask for an email when no `user.email` is known. Default `true`. */
   email?: boolean;
-  /** Attach the last 50 console messages and uncaught errors. Default `true`. */
+  /** Attach recent console output (all levels) and uncaught errors. Default `true`. */
   consoleLogs?: boolean;
+  /** Attach recent API calls made with fetch or XMLHttpRequest. Default `true`. */
+  networkLogs?: boolean;
+  /** Attach the user's recent clicks and page changes, each with its route and page title. Default `true`. */
+  breadcrumbs?: boolean;
   /** While recording, show a cursor halo and click ripples in the video. Default `true`. */
   cursorHighlight?: boolean;
   /** While recording, let the user draw on the page to point things out. Default `true`. */
@@ -73,6 +77,10 @@ export interface FeedbackLabels {
 export interface FeedbackContext {
   url: string;
   path: string;
+  /** Query string parameters of the current route. */
+  query: Record<string, string>;
+  /** URL hash, e.g. `#/settings` for hash routers. */
+  hash: string;
   title: string;
   referrer: string;
   userAgent: string;
@@ -84,9 +92,45 @@ export interface FeedbackContext {
 }
 
 export interface ConsoleEntry {
-  level: 'log' | 'info' | 'warn' | 'error';
+  level: 'debug' | 'log' | 'info' | 'warn' | 'error';
   message: string;
   timestamp: string;
+}
+
+/** An API call made by the page with fetch or XMLHttpRequest. */
+export interface NetworkEntry {
+  type: 'fetch' | 'xhr';
+  method: string;
+  /** Absolute URL; sensitive query parameters (token, key, password…) are redacted. */
+  url: string;
+  /** HTTP status; absent or 0 when the request failed before a response. */
+  status?: number;
+  ok: boolean;
+  /** Milliseconds from start to completion. */
+  duration: number;
+  /** When the request started (ISO 8601). */
+  timestamp: string;
+  /** Network failure or abort message. */
+  error?: string;
+  /** Only with `capture.networkBodies`. Sensitive JSON keys and form fields are redacted. */
+  requestBody?: string;
+  /** Only with `capture.networkBodies`, for text/JSON responses. */
+  responseBody?: string;
+}
+
+export interface CaptureOptions {
+  /** Console messages kept. Default 200. */
+  consoleLimit?: number;
+  /** API calls kept. Default 100. */
+  networkLimit?: number;
+  /** Also record request/response bodies of API calls. Default `false`. */
+  networkBodies?: boolean;
+  /** Clicks and page changes kept in `breadcrumbs`. Default 50. */
+  breadcrumbLimit?: number;
+  /** Maximum characters per recorded body. Default 2000. */
+  maxBodyLength?: number;
+  /** API calls to leave out (substring or RegExp of the URL), e.g. analytics. Your `endpoint` is always left out. */
+  ignoreUrls?: (string | RegExp)[];
 }
 
 /**
@@ -96,11 +140,28 @@ export interface ConsoleEntry {
  */
 export type RecordingEvent =
   | { type: 'pointer'; t: number; x: number; y: number }
-  | { type: 'click'; t: number; x: number; y: number; target: string; text?: string }
+  | { type: 'click'; t: number; x: number; y: number; target: string; text?: string; path: string; title: string }
   | { type: 'scroll'; t: number; x: number; y: number }
   | { type: 'input'; t: number; target: string }
-  | { type: 'navigation'; t: number; url: string }
+  | { type: 'navigation'; t: number; url: string; title: string }
   | { type: 'annotation'; t: number; points: [number, number][] };
+
+/**
+ * A click or page change from anywhere in the session (not only while
+ * recording), with the route and page it happened on.
+ */
+export type Breadcrumb = {
+  timestamp: string;
+  /** Full URL at the time. */
+  url: string;
+  /** Route: pathname + query + hash. */
+  path: string;
+  /** Page title at the time. */
+  title: string;
+} & (
+  | { type: 'click'; target: string; text?: string }
+  | { type: 'navigation'; /** Previous URL; absent for the first page. */ from?: string }
+);
 
 export interface FeedbackPayload {
   type: FeedbackType;
@@ -110,6 +171,9 @@ export interface FeedbackPayload {
   metadata?: Record<string, unknown>;
   context: FeedbackContext;
   consoleLogs?: ConsoleEntry[];
+  networkLogs?: NetworkEntry[];
+  /** Recent clicks and page changes, oldest first. */
+  breadcrumbs?: Breadcrumb[];
   /** PNG image, if the user attached a screenshot. */
   screenshot?: Blob;
   /** WebM/MP4 video, if the user attached a recording. */
@@ -138,6 +202,8 @@ export interface FeedbackOptions {
   features?: FeedbackFeatures;
   /** Screenshot method. `dom` renders the page silently; `display` uses the browser's screen-capture prompt (pixel-perfect). Default `dom`, falling back to `display`. */
   screenshotMode?: 'dom' | 'display';
+  /** How much console and network history to keep. Read once, when the widget starts. */
+  capture?: CaptureOptions;
   /** Maximum recording length in seconds. Default 120. */
   maxRecordingSeconds?: number;
 

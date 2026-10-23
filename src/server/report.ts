@@ -1,4 +1,4 @@
-import type { FeedbackPayload, FeedbackType, RecordingEvent } from '../types';
+import type { Breadcrumb, FeedbackPayload, FeedbackType, NetworkEntry, RecordingEvent } from '../types';
 
 /** A submission as received by the server: the JSON payload plus uploaded files. */
 export interface ParsedFeedback {
@@ -70,7 +70,7 @@ export function describeSteps(events: RecordingEvent[] | undefined): string[] {
     const at = formatTime(event.t);
     switch (event.type) {
       case 'click':
-        steps.push(`${at} Clicked ${event.text ? `"${event.text}" ` : ''}(${event.target})`);
+        steps.push(`${at} Clicked ${event.text ? `"${event.text}" ` : ''}(${event.target}) on ${event.path}`);
         break;
       case 'navigation':
         steps.push(`${at} ${steps.length === 0 ? 'Started on' : 'Navigated to'} ${event.url}`);
@@ -89,6 +89,27 @@ export function describeSteps(events: RecordingEvent[] | undefined): string[] {
   return steps;
 }
 
+/** `10:42:07 Clicked "Export CSV" (button#export) on /dashboard · Dashboard` (times in UTC). */
+export function describeBreadcrumb(crumb: Breadcrumb): string {
+  const time = crumb.timestamp.slice(11, 19);
+  const page = crumb.title ? `${crumb.path} · ${crumb.title}` : crumb.path;
+  if (crumb.type === 'navigation') return `${time} Opened ${page}`;
+  return `${time} Clicked ${crumb.text ? `"${crumb.text}" ` : ''}(${crumb.target}) on ${page}`;
+}
+
+/** API calls that failed: HTTP 4xx/5xx or no response at all. */
+export function failedRequests(entries: NetworkEntry[] | undefined): NetworkEntry[] {
+  return entries?.filter((entry) => !entry.ok) ?? [];
+}
+
+/** `POST https://api.acme.com/export → 500 (231 ms)` */
+export function describeRequest(entry: NetworkEntry): string {
+  const outcome = entry.status ? String(entry.status) : (entry.error ?? 'failed');
+  return `${entry.method} ${entry.url} → ${outcome} (${entry.duration} ms)`;
+}
+
+const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
+
 function reporterLine(payload: ParsedFeedback['payload']): string {
   const { user, email } = payload;
   const parts = [user?.name, email ?? user?.email, user?.id ? `id ${user.id}` : undefined].filter(Boolean);
@@ -106,7 +127,10 @@ export function reportMarkdown(feedback: ParsedFeedback): string {
     reporterLine(payload),
     '',
     '## Environment',
-    `- **Page:** ${context.url}`,
+    `- **Page:** ${context.title ? `${context.title} · ` : ''}${context.url}`,
+    `- **Route:** ${context.path}${context.hash ?? ''}${
+      context.query && Object.keys(context.query).length ? ` · query ${JSON.stringify(context.query)}` : ''
+    }`,
     `- **Browser:** ${context.userAgent}`,
     `- **Viewport:** ${context.viewport.width}×${context.viewport.height} (screen ${context.screen.width}×${context.screen.height} @${context.screen.pixelRatio}x)`,
     `- **Language / timezone:** ${context.language} / ${context.timezone || 'unknown'}`,
@@ -116,6 +140,14 @@ export function reportMarkdown(feedback: ParsedFeedback): string {
   const steps = describeSteps(payload.recordingEvents);
   if (steps.length) {
     lines.push('', '## Steps recorded during the video', ...steps.map((step, i) => `${i + 1}. ${step}`));
+  }
+
+  if (payload.breadcrumbs?.length) {
+    lines.push(
+      '',
+      '## User actions before the report (UTC)',
+      ...payload.breadcrumbs.slice(-20).map((crumb) => `- ${describeBreadcrumb(crumb)}`),
+    );
   }
 
   const problems = payload.consoleLogs?.filter((entry) => entry.level === 'error' || entry.level === 'warn') ?? [];
@@ -129,6 +161,24 @@ export function reportMarkdown(feedback: ParsedFeedback): string {
     );
   }
 
+  const failed = failedRequests(payload.networkLogs);
+  if (failed.length) {
+    lines.push('', '## Failed API calls', ...failed.slice(-15).map((entry) => `- \`${describeRequest(entry)}\``));
+    const withBody = failed.filter((entry) => entry.responseBody).slice(-3);
+    for (const entry of withBody) {
+      lines.push('', `Response of \`${entry.method} ${entry.url}\`:`, '```', entry.responseBody!, '```');
+    }
+  }
+
+  const consoleCount = payload.consoleLogs?.length ?? 0;
+  const networkCount = payload.networkLogs?.length ?? 0;
+  if (consoleCount || networkCount) {
+    lines.push(
+      '',
+      `_Captured ${plural(consoleCount, 'console message')} and ${plural(networkCount, 'API call')} (${failed.length} failed); the full logs are in feedback-details.json._`,
+    );
+  }
+
   if (payload.metadata && Object.keys(payload.metadata).length) {
     lines.push('', '## Metadata', '```json', JSON.stringify(payload.metadata, null, 2), '```');
   }
@@ -138,16 +188,19 @@ export function reportMarkdown(feedback: ParsedFeedback): string {
   return lines.join('\n');
 }
 
-/** Files to upload: screenshot, video, and a JSON file with the full console log and recording events. */
+/** Files to upload: screenshot, video, and a JSON file with the full console log, API calls and recording events. */
 export function reportAttachments(feedback: ParsedFeedback): ReportAttachment[] {
   const files: ReportAttachment[] = [];
   if (feedback.screenshot) files.push({ filename: feedback.screenshot.name || 'screenshot.png', data: feedback.screenshot });
   if (feedback.video) files.push({ filename: feedback.video.name || 'recording.webm', data: feedback.video });
-  const { consoleLogs, recordingEvents, context } = feedback.payload;
-  if (consoleLogs?.length || recordingEvents?.length) {
+  const { consoleLogs, networkLogs, breadcrumbs, recordingEvents, context } = feedback.payload;
+  if (consoleLogs?.length || networkLogs?.length || breadcrumbs?.length || recordingEvents?.length) {
+    const details = { context, breadcrumbs, consoleLogs, networkLogs, recordingEvents };
     files.push({
       filename: 'feedback-details.json',
-      data: new Blob([JSON.stringify({ context, consoleLogs, recordingEvents }, null, 2)], { type: 'application/json' }),
+      data: new Blob([JSON.stringify(details, null, 2)], {
+        type: 'application/json',
+      }),
     });
   }
   return files;

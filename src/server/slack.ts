@@ -1,6 +1,9 @@
 import type { FeedbackType } from '../types';
 import {
+  describeBreadcrumb,
+  describeRequest,
   describeSteps,
+  failedRequests,
   reportAttachments,
   reportTitle,
   TYPE_EMOJI,
@@ -58,12 +61,25 @@ export function slackBlocks(feedback: ParsedFeedback): unknown[] {
       type: 'section',
       text: { type: 'mrkdwn', text: clip(`*Steps recorded during the video*\n${steps.map((s, i) => `${i + 1}. ${esc(s)}`).join('\n')}`) },
     });
+  } else if (payload.breadcrumbs?.length) {
+    const recent = payload.breadcrumbs.slice(-8).map((crumb) => `• ${esc(describeBreadcrumb(crumb))}`);
+    blocks.push({
+      type: 'section',
+      text: { type: 'mrkdwn', text: clip(`*Last actions before the report (UTC)*\n${recent.join('\n')}`) },
+    });
   }
   const errors = payload.consoleLogs?.filter((entry) => entry.level === 'error') ?? [];
   if (errors.length) {
     blocks.push({
       type: 'section',
       text: { type: 'mrkdwn', text: clip(`*Console errors (${errors.length})*\n\`\`\`${esc(errors.slice(-5).map((e) => e.message).join('\n'))}\`\`\``) },
+    });
+  }
+  const failed = failedRequests(payload.networkLogs);
+  if (failed.length) {
+    blocks.push({
+      type: 'section',
+      text: { type: 'mrkdwn', text: clip(`*Failed API calls (${failed.length})*\n\`\`\`${esc(failed.slice(-8).map(describeRequest).join('\n'))}\`\`\``) },
     });
   }
   return blocks;

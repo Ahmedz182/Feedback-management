@@ -48,6 +48,11 @@ createServer(async (req, res) => {
   try {
     const path = req.url.split('?')[0];
     if (path === '/api/feedback') return await handleFeedback(req, res);
+    if (path === '/api/export') {
+      // Always fails, so the demo has a broken API call to report.
+      res.writeHead(500, { 'content-type': 'application/json' }).end('{"error":"Export service unavailable"}');
+      return;
+    }
     // The demo is an SPA: unknown paths serve the page so client-side routes survive a reload.
     const file = staticFiles[path] ?? staticFiles['/'];
     res.writeHead(200, { 'content-type': types[extname(file)] ?? 'text/plain' }).end(await readFile(file));

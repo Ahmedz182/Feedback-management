@@ -13,7 +13,7 @@ You set it up once and it works across your whole app, or only on the pages you 
 - 🎥 Screen recording that captures the **cursor and clicks**, lets users **draw on the page while recording**, and logs every click, scroll and page change as **timestamped steps**
 - 🔌 Server-side integrations for **Slack** (message + files in thread) and **ClickUp** (task + attachments)
 - 🧭 Page targeting with `include`/`exclude` globs that follow SPA route changes automatically
-- 🧾 Context captured automatically: URL, browser, viewport, timezone, recent console logs and errors, your user and metadata
+- 🧾 Captured automatically with every report: **all console logs**, **API calls** (fetch and XHR, with status and timing), **clicks and page changes with their route and page title**, plus URL, query params, browser, viewport, your user and metadata
 - 🎨 Accent color, light/dark/auto theme, position, and every text label can be customized
 - 🧱 Styles live in a Shadow DOM, so your CSS can't break the widget and the widget can't break your CSS
 - 📦 One small dependency (`html-to-image`), typed, ESM + CJS + CDN builds, safe under SSR
@@ -162,6 +162,58 @@ The widget listens to `pushState`, `replaceState`, `popstate` and `hashchange`, 
 
 `open()` called from your own code works on every page. The `pages` rules only control the floating button.
 
+## What each report contains
+
+Everything below is attached automatically, so the person fixing the bug doesn't have to ask "what were you doing?" or "what did the console say?".
+
+| Field | What it holds | Default |
+| --- | --- | --- |
+| `context` | Page title, full URL, path, **query params**, hash, referrer, browser, language, timezone, viewport, screen | always |
+| `breadcrumbs` | The user's last 50 **clicks and page changes** across the session, each with the element clicked, its label, and the **route and page title** it happened on | on |
+| `consoleLogs` | The last 200 console messages at **every level** (`debug`, `log`, `info`, `warn`, `error`), plus uncaught errors and unhandled promise rejections | on |
+| `networkLogs` | The last 100 **API calls** made with `fetch` or `XMLHttpRequest`: method, URL, status, duration, network errors, and optionally bodies | on |
+| `recordingEvents` | Timestamped pointer path, clicks, scrolls, page changes and drawings during a recording (see below) | when a video is attached |
+
+Example breadcrumb and API call:
+
+```jsonc
+// breadcrumbs[]
+{ "type": "click", "timestamp": "2026-10-23T14:32:46.817Z", "target": "button#export", "text": "Export CSV",
+  "path": "/dashboard?range=7d", "url": "https://app.acme.com/dashboard?range=7d", "title": "Dashboard · Acme" }
+{ "type": "navigation", "timestamp": "2026-10-23T14:32:47.163Z", "path": "/reports", "title": "Reports · Acme",
+  "url": "https://app.acme.com/reports", "from": "https://app.acme.com/dashboard?range=7d" }
+
+// networkLogs[]
+{ "type": "fetch", "method": "POST", "url": "https://app.acme.com/api/export?format=csv", "status": 500, "ok": false,
+  "duration": 231, "timestamp": "2026-10-23T14:32:46.818Z" }
+```
+
+In Slack and ClickUp these become readable sections: **User actions before the report**, **Console errors & warnings** and **Failed API calls**. The complete logs are attached as `feedback-details.json`.
+
+**Tuning:**
+
+```js
+init({
+  capture: {
+    consoleLimit: 200,        // console messages kept
+    networkLimit: 100,        // API calls kept
+    breadcrumbLimit: 50,      // clicks/page changes kept
+    networkBodies: true,      // also keep request/response bodies (off by default)
+    maxBodyLength: 2000,      // characters per body
+    ignoreUrls: ['google-analytics.com', /\/healthz$/], // leave noisy calls out
+  },
+  features: { consoleLogs: true, networkLogs: true, breadcrumbs: true },
+});
+```
+
+**Privacy safeguards:**
+
+- Typed values are never recorded. Clicks store the element and its visible label, and `input` events store only which field changed.
+- Sensitive query parameters (`token`, `key`, `password`, `auth`, `session`, `signature`…) are replaced with `[redacted]`.
+- Request and response bodies are **off by default**. When you enable them, sensitive JSON keys and form fields are redacted, and only text/JSON responses are kept, truncated to `maxBodyLength`.
+- The widget's own submission to `endpoint` and its own clicks are never logged.
+- Call `init()` as early as possible, because only logs and requests made after setup are captured.
+
 ## Recording: drawing and mouse tracking
 
 When a user records their screen:
@@ -172,17 +224,18 @@ When a user records their screen:
 
 ```jsonc
 [
-  { "type": "navigation", "t": 0,    "url": "https://app.acme.com/" },
+  { "type": "navigation", "t": 0,    "url": "https://app.acme.com/", "title": "Dashboard · Acme" },
   { "type": "pointer",    "t": 140,  "x": 512, "y": 300 },
-  { "type": "click",      "t": 318,  "x": 1018, "y": 326, "target": "button#export", "text": "Export CSV" },
-  { "type": "navigation", "t": 365,  "url": "https://app.acme.com/reports" },
+  { "type": "click",      "t": 318,  "x": 1018, "y": 326, "target": "button#export", "text": "Export CSV",
+    "path": "/", "title": "Dashboard · Acme" },
+  { "type": "navigation", "t": 365,  "url": "https://app.acme.com/reports", "title": "Reports · Acme" },
   { "type": "scroll",     "t": 900,  "x": 0, "y": 400 },
   { "type": "input",      "t": 1200, "target": "input#email" },
   { "type": "annotation", "t": 1814, "points": [[1100, 326], [1095, 340]] }
 ]
 ```
 
-The Slack and ClickUp integrations turn this log into readable **steps to reproduce** (`0:01 Clicked "Export CSV" (button#export)`).
+The Slack and ClickUp integrations turn this log into readable **steps to reproduce** (`0:01 Clicked "Export CSV" (button#export) on /dashboard`).
 
 Privacy: what users type is never recorded. `input` events contain only the element, never its value, and click labels come only from buttons, links and similar controls. The widget's own clicks are ignored.
 
@@ -196,7 +249,7 @@ The widget `POST`s `multipart/form-data` with these fields:
 
 | Field | Content |
 | --- | --- |
-| `payload` | JSON: `type`, `message`, `email`, `user`, `metadata`, `context`, `consoleLogs`, `recordingEvents` |
+| `payload` | JSON: `type`, `message`, `email`, `user`, `metadata`, `context`, `breadcrumbs`, `consoleLogs`, `networkLogs`, `recordingEvents` |
 | `screenshot` | `screenshot.png` (if attached) |
 | `video` | `recording.webm` or `recording.mp4` (if attached) |
 
@@ -289,8 +342,8 @@ app.post('/api/feedback', toNodeHandler(handler)); // mount before any multipart
 | | Slack | ClickUp |
 | --- | --- | --- |
 | Title | `🐞 [Bug] First line of the message` | Task name `[Bug] First line of the message` |
-| Body | Message, reporter, page link, browser, recorded steps, console errors | Markdown description: message, reporter, environment, recorded steps, console errors & warnings, metadata |
-| Files | Screenshot, video and `feedback-details.json` uploaded into the message thread (bot token only) | Screenshot, video and `feedback-details.json` as task attachments |
+| Body | Message, reporter, page link, browser, recorded steps (or the last user actions), console errors, failed API calls | Markdown description: message, reporter, page and route, environment, recorded steps, user actions, console errors & warnings, failed API calls (with response bodies when captured), metadata |
+| Files | Screenshot, video and `feedback-details.json` (full console, network and click logs) uploaded into the message thread (bot token only) | Screenshot, video and `feedback-details.json` as task attachments |
 | Routing | `channelByType` | `listByType`, `priority`, `tags`, `assignees`, `status` |
 
 ### Slack setup
@@ -311,7 +364,7 @@ app.post('/api/feedback', toNodeHandler(handler)); // mount before any multipart
 - Each failure is passed to `onError(error, destination)` (default: `console.error`), and the response body lists the destinations that failed.
 - If the widget runs on a different domain from your API, set `allowedOrigins: ['https://app.acme.com']`.
 
-You can also use the pieces on their own: `parseFeedback(request)`, `sendToSlack(feedback, options)`, `createClickUpTask(feedback, options)`, `reportMarkdown(feedback)` and `describeSteps(events)`.
+You can also use the pieces on their own: `parseFeedback(request)`, `sendToSlack(feedback, options)`, `createClickUpTask(feedback, options)`, `reportMarkdown(feedback)`, `describeSteps(events)`, `describeBreadcrumb(crumb)` and `failedRequests(networkLogs)`.
 
 ## Options
 
@@ -326,7 +379,10 @@ You can also use the pieces on their own: `parseFeedback(request)`, `sendToSlack
 | `features.screenshot` | `boolean` | `true` | Allow screenshots |
 | `features.video` | `boolean` | `true` | Allow screen recording |
 | `features.email` | `boolean` | `true` | Ask for an email when `user.email` is unknown |
-| `features.consoleLogs` | `boolean` | `true` | Attach the last 50 console messages and errors |
+| `features.consoleLogs` | `boolean` | `true` | Attach recent console output (all levels) and uncaught errors |
+| `features.networkLogs` | `boolean` | `true` | Attach recent fetch/XHR calls |
+| `features.breadcrumbs` | `boolean` | `true` | Attach recent clicks and page changes with their route and page title |
+| `capture` | `CaptureOptions` | see [above](#what-each-report-contains) | Buffer sizes, request bodies, ignored URLs |
 | `features.cursorHighlight` | `boolean` | `true` | Cursor halo and click ripples in recordings |
 | `features.recordingDrawing` | `boolean` | `true` | Pen for drawing on the page while recording |
 | `features.interactionLog` | `boolean` | `true` | Send `recordingEvents` (pointer, clicks, scroll, navigation, drawings) |

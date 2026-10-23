@@ -4,7 +4,7 @@ import type { RecordingEvent } from '../types';
 const MOVE_INTERVAL_MS = 100;
 const SCROLL_INTERVAL_MS = 250;
 const MAX_TEXT_LENGTH = 60;
-const INTERACTIVE = 'a,button,[role="button"],[role="link"],[role="tab"],[role="menuitem"],label,summary,select';
+export const INTERACTIVE = 'a,button,[role="button"],[role="link"],[role="tab"],[role="menuitem"],label,summary,select';
 
 /** A short, stable description of an element, such as `button#save.btn.primary`. */
 export function describeElement(el: Element): string {
@@ -12,13 +12,15 @@ export function describeElement(el: Element): string {
   if (el.id) return `${description}#${el.id}`;
   const testId = el.getAttribute('data-testid');
   if (testId) return `${description}[data-testid="${testId}"]`;
+  const href = el.tagName === 'A' ? el.getAttribute('href') : null;
+  if (href && !href.startsWith('javascript:')) return `${description}[href="${href.split('?')[0]}"]`;
   const classes = Array.from(el.classList).slice(0, 2);
   if (classes.length) description += `.${classes.join('.')}`;
   return description;
 }
 
 /** Visible label of an interactive element. Never reads form field values. */
-function labelOf(el: Element): string | undefined {
+export function labelOf(el: Element): string | undefined {
   const text = (el.getAttribute('aria-label') || el.textContent || '').replace(/\s+/g, ' ').trim();
   if (!text) return undefined;
   return text.length > MAX_TEXT_LENGTH ? `${text.slice(0, MAX_TEXT_LENGTH)}…` : text;
@@ -69,6 +71,8 @@ export function startSessionTracking(ignore?: Element): SessionTracker {
       y: Math.round(event.clientY),
       target: describeElement(target),
       text: target.matches(INTERACTIVE) ? labelOf(target) : undefined,
+      path: location.pathname + location.search + location.hash,
+      title: document.title,
     });
   };
 
@@ -89,10 +93,10 @@ export function startSessionTracking(ignore?: Element): SessionTracker {
   const stopRouteWatch = onRouteChange(() => {
     if (location.href === lastUrl) return;
     lastUrl = location.href;
-    add({ type: 'navigation', url: lastUrl });
+    add({ type: 'navigation', url: lastUrl, title: document.title });
   });
 
-  add({ type: 'navigation', url: lastUrl });
+  add({ type: 'navigation', url: lastUrl, title: document.title });
   document.addEventListener('pointermove', onPointerMove, { capture: true, passive: true });
   document.addEventListener('click', onClick, true);
   document.addEventListener('change', onChange, true);

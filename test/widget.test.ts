@@ -104,6 +104,33 @@ describe('FeedbackWidget', () => {
     vi.unstubAllGlobals();
   });
 
+  it('attaches API calls (not its own submission), breadcrumbs and route details', async () => {
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 201 }));
+    vi.stubGlobal('fetch', fetchMock);
+    history.replaceState({}, '', '/orders?status=open#top');
+    widget = new FeedbackWidget({ endpoint: '/api/feedback' });
+    await fetch('/api/orders');
+    document.body.append(Object.assign(document.createElement('button'), { id: 'refresh', textContent: 'Refresh' }));
+    document.getElementById('refresh')!.click();
+
+    widget.open();
+    type('List is empty');
+    $<HTMLFormElement>('form').dispatchEvent(new Event('submit', { cancelable: true }));
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    const body = (fetchMock.mock.calls[1] as unknown as [string, RequestInit])[1].body as FormData;
+    const payload = JSON.parse(body.get('payload') as string);
+    expect(payload.networkLogs).toEqual([
+      expect.objectContaining({ method: 'GET', url: 'http://localhost:3000/api/orders', status: 201 }),
+    ]);
+    expect(payload.breadcrumbs).toContainEqual(
+      expect.objectContaining({ type: 'click', target: 'button#refresh', text: 'Refresh', path: '/orders?status=open#top' }),
+    );
+    expect(payload.context).toMatchObject({ path: '/orders', query: { status: 'open' }, hash: '#top' });
+    document.getElementById('refresh')!.remove();
+    vi.unstubAllGlobals();
+  });
+
   it('shows an error and keeps the message when submission fails', async () => {
     const onError = vi.fn();
     widget = new FeedbackWidget({

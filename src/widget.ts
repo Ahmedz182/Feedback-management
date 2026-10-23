@@ -2,6 +2,8 @@ import { annotate } from './capture/annotate';
 import { RecordingOverlay } from './capture/overlay';
 import { startRecording, isRecordingSupported, type Recording } from './capture/recorder';
 import { captureDisplay, captureDom, isDisplayCaptureSupported } from './capture/screenshot';
+import { startBreadcrumbs, type BreadcrumbCapture } from './capture/breadcrumbs';
+import { startNetworkCapture, type NetworkCapture } from './capture/network';
 import { startSessionTracking } from './capture/session';
 import { collectContext, startConsoleCapture, type ConsoleCapture } from './context';
 import { isPageAllowed } from './pages';
@@ -105,6 +107,8 @@ export class FeedbackWidget {
 
   private stopRouteWatch: (() => void) | null = null;
   private consoleCapture: ConsoleCapture | null = null;
+  private networkCapture: NetworkCapture | null = null;
+  private breadcrumbs: BreadcrumbCapture | null = null;
 
   constructor(options: FeedbackOptions = {}) {
     this.options = options;
@@ -124,7 +128,7 @@ export class FeedbackWidget {
 
     this.applyHostStyles();
     this.render();
-    this.syncConsoleCapture();
+    this.syncLogCapture();
     this.stopRouteWatch = onRouteChange(() => this.syncPage());
     this.syncPage();
     document.addEventListener('keydown', this.onKeyDown);
@@ -188,7 +192,7 @@ export class FeedbackWidget {
     this.labels = { ...DEFAULT_LABELS, ...this.options.labels };
     if (!this.types().includes(this.type)) this.type = this.types()[0];
     this.applyHostStyles();
-    this.syncConsoleCapture();
+    this.syncLogCapture();
     if (this.recording || this.capturing) {
       this.renderPending = true;
     } else {
@@ -205,6 +209,8 @@ export class FeedbackWidget {
     this.overlay?.destroy();
     this.stopRouteWatch?.();
     this.consoleCapture?.stop();
+    this.networkCapture?.stop();
+    this.breadcrumbs?.stop();
     this.revokeObjectUrls();
     document.removeEventListener('keydown', this.onKeyDown);
     this.host?.remove();
@@ -235,12 +241,48 @@ export class FeedbackWidget {
     this.host.setAttribute('data-theme', theme);
   }
 
-  private syncConsoleCapture() {
-    const wanted = this.feature('consoleLogs');
-    if (wanted && !this.consoleCapture) this.consoleCapture = startConsoleCapture();
-    if (!wanted && this.consoleCapture) {
+  /** Starts or stops console, network and breadcrumb capture to match `features`. */
+  private syncLogCapture() {
+    const capture = this.options.capture ?? {};
+    const wantConsole = this.feature('consoleLogs');
+    if (wantConsole && !this.consoleCapture) this.consoleCapture = startConsoleCapture(capture.consoleLimit);
+    if (!wantConsole && this.consoleCapture) {
       this.consoleCapture.stop();
       this.consoleCapture = null;
+    }
+
+    const wantNetwork = this.feature('networkLogs');
+    if (wantNetwork && !this.networkCapture) {
+      this.networkCapture = startNetworkCapture({
+        limit: capture.networkLimit ?? 100,
+        bodies: capture.networkBodies ?? false,
+        maxBodyLength: capture.maxBodyLength ?? 2000,
+        // The widget's own submissions are not part of the user's session.
+        ignore: [...(capture.ignoreUrls ?? []), (url: string) => this.isOwnEndpoint(url)],
+      });
+    }
+    if (!wantNetwork && this.networkCapture) {
+      this.networkCapture.stop();
+      this.networkCapture = null;
+    }
+
+    const wantBreadcrumbs = this.feature('breadcrumbs');
+    if (wantBreadcrumbs && !this.breadcrumbs) {
+      this.breadcrumbs = startBreadcrumbs(capture.breadcrumbLimit, () => this.host);
+    }
+    if (!wantBreadcrumbs && this.breadcrumbs) {
+      this.breadcrumbs.stop();
+      this.breadcrumbs = null;
+    }
+  }
+
+  private isOwnEndpoint(url: string): boolean {
+    const { endpoint } = this.options;
+    if (!endpoint) return false;
+    try {
+      return new URL(endpoint, location.href).href === url.split('?')[0];
+    } catch {
+      return false;
     }
   }
 
@@ -648,6 +690,8 @@ export class FeedbackWidget {
     const resolvedMetadata = typeof metadata === 'function' ? metadata() : metadata;
     if (resolvedMetadata) payload.metadata = resolvedMetadata;
     if (this.consoleCapture) payload.consoleLogs = this.consoleCapture.entries();
+    if (this.networkCapture) payload.networkLogs = this.networkCapture.entries();
+    if (this.breadcrumbs) payload.breadcrumbs = this.breadcrumbs.entries();
     if (this.screenshot) payload.screenshot = this.screenshot;
     if (this.video) payload.video = this.video;
     if (this.video && this.recordingEvents) payload.recordingEvents = this.recordingEvents;
