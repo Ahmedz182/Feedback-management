@@ -104,6 +104,7 @@ export class FeedbackWidget {
   private manuallyHidden = false;
   private renderPending = false;
   private destroyed = false;
+  private idleWaiters: (() => void)[] = [];
 
   private stopRouteWatch: (() => void) | null = null;
   private consoleCapture: ConsoleCapture | null = null;
@@ -168,10 +169,10 @@ export class FeedbackWidget {
     this.updateLauncher();
   }
 
-  /** Hides the floating button (and closes the panel) until `show()` is called. */
+  /** Hides the floating button (and closes the panel) until `show()` is called. A recording in progress keeps going. */
   hide(): void {
     this.manuallyHidden = true;
-    this.close();
+    if (!this.busy) this.close();
     this.updateLauncher();
   }
 
@@ -185,10 +186,15 @@ export class FeedbackWidget {
     this.options = { ...this.options, metadata };
   }
 
-  /** Changes options after setup. Any message the user is typing is kept. */
+  /** Changes some options after setup. Any message the user is typing, and any recording in progress, is kept. */
   update(options: Partial<FeedbackOptions>): void {
+    this.configure({ ...this.options, ...options });
+  }
+
+  /** Replaces all options. Any message the user is typing, and any recording in progress, is kept. */
+  configure(options: FeedbackOptions): void {
     if (this.destroyed) return;
-    this.options = { ...this.options, ...options };
+    this.options = options;
     this.labels = { ...DEFAULT_LABELS, ...this.options.labels };
     if (!this.types().includes(this.type)) this.type = this.types()[0];
     this.applyHostStyles();
@@ -219,6 +225,26 @@ export class FeedbackWidget {
 
   get opened(): boolean {
     return this.isOpen;
+  }
+
+  /** True after `destroy()`, or when created without a DOM (server-side rendering). */
+  get isDestroyed(): boolean {
+    return this.destroyed;
+  }
+
+  /** True while a screen recording is running. */
+  get isRecording(): boolean {
+    return !!this.recording;
+  }
+
+  /** Resolves once no recording or screenshot is in progress. */
+  whenIdle(): Promise<void> {
+    if (!this.busy) return Promise.resolve();
+    return new Promise((resolve) => this.idleWaiters.push(resolve));
+  }
+
+  private get busy(): boolean {
+    return this.capturing || !!this.recording;
   }
 
   // ------------------------------------------------------------------ helpers
@@ -295,7 +321,8 @@ export class FeedbackWidget {
       return;
     }
     this.pageAllowed = isPageAllowed(this.options.pages, url);
-    if (!this.pageAllowed && this.isOpen) this.close();
+    // A recording or screenshot in progress follows the user across routes; it is never cut short here.
+    if (!this.pageAllowed && this.isOpen && !this.busy) this.close();
     this.updateLauncher();
   }
 
@@ -628,8 +655,11 @@ export class FeedbackWidget {
       els.timer.textContent = formatSeconds(0);
       this.recording = await startRecording({
         maxSeconds: this.options.maxRecordingSeconds ?? 120,
+        surface: this.options.recordingSurface ?? 'window',
         onTick: (seconds) => (els.timer.textContent = formatSeconds(seconds)),
       });
+      // SPA route changes keep recording; a full page load would end it, so ask first.
+      window.addEventListener('beforeunload', this.onBeforeUnload);
       const tracker = this.feature('interactionLog') ? startSessionTracking(this.host ?? undefined) : null;
       if (this.root && (this.feature('cursorHighlight') || this.feature('recordingDrawing'))) {
         this.overlay = new RecordingOverlay(this.root, {
@@ -650,6 +680,7 @@ export class FeedbackWidget {
     } catch (error) {
       this.handleError(error);
     } finally {
+      window.removeEventListener('beforeunload', this.onBeforeUnload);
       this.recording = null;
       this.overlay?.destroy();
       this.overlay = null;
@@ -657,6 +688,11 @@ export class FeedbackWidget {
       this.finishCapture();
     }
   }
+
+  private onBeforeUnload = (event: BeforeUnloadEvent) => {
+    event.preventDefault();
+    event.returnValue = '';
+  };
 
   private toggleDrawing() {
     if (!this.overlay) return;
@@ -667,12 +703,16 @@ export class FeedbackWidget {
 
   private finishCapture() {
     this.capturing = false;
-    if (this.destroyed || !this.els) return;
-    if (this.renderPending) this.render();
-    this.els.recordingBar.hidden = true;
-    this.renderPreviews();
-    if (this.isOpen) this.els.panel.hidden = false;
-    this.updateLauncher();
+    if (!this.destroyed && this.els) {
+      if (this.renderPending) this.render();
+      this.els.recordingBar.hidden = true;
+      this.renderPreviews();
+      // Bring the report back even if the user navigated somewhere the launcher is hidden.
+      this.isOpen = true;
+      this.els.panel.hidden = false;
+      this.updateLauncher();
+    }
+    this.idleWaiters.splice(0).forEach((resolve) => resolve());
   }
 
   // ------------------------------------------------------------------- submit

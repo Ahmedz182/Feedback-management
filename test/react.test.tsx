@@ -1,10 +1,14 @@
 import { act, render, cleanup } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FeedbackProvider, HideFeedback, useFeedback } from '../src/react';
+import { destroy } from '../src/index';
 
 const shadow = () => document.querySelector('[data-feedback-widget]')?.shadowRoot ?? null;
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  destroy();
+});
 
 describe('React bindings', () => {
   it('mounts once and exposes controls through useFeedback()', () => {
@@ -53,9 +57,18 @@ describe('React bindings', () => {
     expect(launcher().hidden).toBe(false);
   });
 
-  it('cleans up on unmount', () => {
+  it('cleans up after unmount', async () => {
     const { unmount } = render(<FeedbackProvider />);
     unmount();
-    expect(document.querySelector('[data-feedback-widget]')).toBeNull();
+    await vi.waitFor(() => expect(document.querySelector('[data-feedback-widget]')).toBeNull());
+  });
+
+  it('keeps the same widget when the provider remounts (e.g. on a route change)', async () => {
+    const first = render(<FeedbackProvider />);
+    const host = document.querySelector('[data-feedback-widget]');
+    first.unmount();
+    render(<FeedbackProvider />);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(document.querySelector('[data-feedback-widget]')).toBe(host);
   });
 });

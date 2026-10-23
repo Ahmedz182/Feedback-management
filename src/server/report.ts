@@ -84,6 +84,9 @@ export function describeSteps(events: RecordingEvent[] | undefined): string[] {
       case 'annotation':
         steps.push(`${at} Drew on the page`);
         break;
+      case 'visibility':
+        steps.push(`${at} ${event.state === 'hidden' ? 'Switched to another tab or app' : 'Came back to the page'}`);
+        break;
     }
   }
   return steps;

@@ -7,13 +7,17 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { FeedbackWidget } from './widget';
+import { destroy, getInstance, init } from './index';
+import type { FeedbackWidget } from './widget';
 import type { FeedbackOptions, FeedbackType, FeedbackUser } from './types';
 
 export type * from './types';
 export { FeedbackWidget } from './widget';
 
 const FeedbackContext = createContext<FeedbackWidget | null>(null);
+
+// Every provider shares the one global widget from `init()`.
+let mountedProviders = 0;
 
 export interface FeedbackProviderProps extends FeedbackOptions {
   children?: ReactNode;
@@ -43,6 +47,9 @@ function withLatestCallbacks(latest: { current: FeedbackOptions }): FeedbackOpti
 /**
  * Mount once near the root of your app. Renders the floating feedback button
  * on every page matched by `pages`, and lets descendants call `useFeedback()`.
+ *
+ * The widget is global: a provider that remounts (route change, StrictMode)
+ * keeps the same widget, and a recording in progress survives an unmount.
  */
 export function FeedbackProvider({ children, ...options }: FeedbackProviderProps) {
   const [widget, setWidget] = useState<FeedbackWidget | null>(null);
@@ -51,11 +58,19 @@ export function FeedbackProvider({ children, ...options }: FeedbackProviderProps
   const key = optionsKey(options);
 
   useEffect(() => {
-    const created = new FeedbackWidget(withLatestCallbacks(latest));
-    setWidget(created);
+    mountedProviders += 1;
+    const shared = init(withLatestCallbacks(latest));
+    setWidget(shared);
     return () => {
-      created.destroy();
+      mountedProviders -= 1;
       setWidget(null);
+      // Defer so a provider that mounts again straight away keeps the widget,
+      // and let a recording in progress finish before tearing down.
+      setTimeout(() => {
+        void shared.whenIdle().then(() => {
+          if (mountedProviders === 0 && getInstance() === shared) destroy();
+        });
+      });
     };
   }, []);
 
@@ -63,7 +78,7 @@ export function FeedbackProvider({ children, ...options }: FeedbackProviderProps
   useEffect(() => {
     if (!widget || appliedKey.current === key) return;
     appliedKey.current = key;
-    widget.update(withLatestCallbacks(latest));
+    widget.configure(withLatestCallbacks(latest));
   }, [widget, key]);
 
   return <FeedbackContext.Provider value={widget}>{children}</FeedbackContext.Provider>;

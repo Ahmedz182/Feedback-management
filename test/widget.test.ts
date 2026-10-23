@@ -189,11 +189,20 @@ describe('FeedbackWidget', () => {
 });
 
 describe('init()', () => {
-  it('keeps a single instance across repeated calls', () => {
-    const first = init();
-    const second = init();
-    expect(first).not.toBe(second);
-    expect(getInstance()).toBe(second);
+  it('reconfigures the same instance on repeated calls', () => {
+    const first = init({ labels: { title: 'First' } });
+    const second = init({ labels: { title: 'Second' } });
+    expect(second).toBe(first);
+    expect(getInstance()).toBe(first);
     expect(document.querySelectorAll('[data-feedback-widget]')).toHaveLength(1);
+    expect($('h2').textContent).toBe('Second');
+  });
+
+  it('creates a fresh instance after destroy()', () => {
+    const first = init();
+    destroy();
+    const second = init();
+    expect(second).not.toBe(first);
+    expect(second.isDestroyed).toBe(false);
   });
 });

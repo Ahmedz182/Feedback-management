@@ -89,6 +89,8 @@ export function startSessionTracking(ignore?: Element): SessionTracker {
     log.push({ type: 'scroll', t, x: Math.round(window.scrollX), y: Math.round(window.scrollY) });
   };
 
+  const onVisibility = () => add({ type: 'visibility', state: document.visibilityState === 'hidden' ? 'hidden' : 'visible' });
+
   let lastUrl = location.href;
   const stopRouteWatch = onRouteChange(() => {
     if (location.href === lastUrl) return;
@@ -101,6 +103,7 @@ export function startSessionTracking(ignore?: Element): SessionTracker {
   document.addEventListener('click', onClick, true);
   document.addEventListener('change', onChange, true);
   window.addEventListener('scroll', onScroll, { capture: true, passive: true });
+  document.addEventListener('visibilitychange', onVisibility);
 
   return {
     add,
@@ -111,6 +114,7 @@ export function startSessionTracking(ignore?: Element): SessionTracker {
       document.removeEventListener('click', onClick, true);
       document.removeEventListener('change', onChange, true);
       window.removeEventListener('scroll', onScroll, true);
+      document.removeEventListener('visibilitychange', onVisibility);
     },
   };
 }

@@ -9,11 +9,15 @@ export type * from './types';
 let instance: FeedbackWidget | null = null;
 
 /**
- * Sets up the widget once for the whole app. Calling it again replaces the
- * previous instance (safe with hot reloading). Returns the instance.
+ * Sets up the widget once for the whole app and returns it. Calling it again
+ * (hot reloading, a remounted layout) reconfigures the same widget instead of
+ * creating another, so a recording in progress keeps going.
  */
 export function init(options: FeedbackOptions = {}): FeedbackWidget {
-  instance?.destroy();
+  if (instance && !instance.isDestroyed) {
+    instance.configure(options);
+    return instance;
+  }
   instance = new FeedbackWidget(options);
   return instance;
 }

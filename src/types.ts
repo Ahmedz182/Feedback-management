@@ -144,7 +144,9 @@ export type RecordingEvent =
   | { type: 'scroll'; t: number; x: number; y: number }
   | { type: 'input'; t: number; target: string }
   | { type: 'navigation'; t: number; url: string; title: string }
-  | { type: 'annotation'; t: number; points: [number, number][] };
+  | { type: 'annotation'; t: number; points: [number, number][] }
+  /** The user left the page's tab (`hidden`) or came back (`visible`). Recording continues either way. */
+  | { type: 'visibility'; t: number; state: 'hidden' | 'visible' };
 
 /**
  * A click or page change from anywhere in the session (not only while
@@ -204,6 +206,13 @@ export interface FeedbackOptions {
   screenshotMode?: 'dom' | 'display';
   /** How much console and network history to keep. Read once, when the widget starts. */
   capture?: CaptureOptions;
+  /**
+   * What the screen-share picker suggests for recordings. `window` (default)
+   * keeps recording what the user sees when they switch tabs; `screen` also
+   * follows them into other apps; `tab` records only this page. The user can
+   * always pick something else in the browser's picker.
+   */
+  recordingSurface?: 'tab' | 'window' | 'screen';
   /** Maximum recording length in seconds. Default 120. */
   maxRecordingSeconds?: number;
 
