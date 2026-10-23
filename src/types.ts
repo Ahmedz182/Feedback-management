@@ -33,6 +33,12 @@ export interface FeedbackFeatures {
   email?: boolean;
   /** Attach the last 50 console messages and uncaught errors. Default `true`. */
   consoleLogs?: boolean;
+  /** While recording, show a cursor halo and click ripples in the video. Default `true`. */
+  cursorHighlight?: boolean;
+  /** While recording, let the user draw on the page to point things out. Default `true`. */
+  recordingDrawing?: boolean;
+  /** While recording, log mouse movement, clicks, scrolling and navigation as `recordingEvents`. Default `true`. */
+  interactionLog?: boolean;
 }
 
 export interface FeedbackLabels {
@@ -48,6 +54,8 @@ export interface FeedbackLabels {
   screenshot: string;
   record: string;
   stopRecording: string;
+  drawOnPage: string;
+  clearDrawing: string;
   remove: string;
   submit: string;
   sending: string;
@@ -81,6 +89,19 @@ export interface ConsoleEntry {
   timestamp: string;
 }
 
+/**
+ * Something the user did while recording. `t` is milliseconds since the
+ * recording started, so events line up with the video timeline.
+ * Coordinates are viewport pixels. Form field values are never recorded.
+ */
+export type RecordingEvent =
+  | { type: 'pointer'; t: number; x: number; y: number }
+  | { type: 'click'; t: number; x: number; y: number; target: string; text?: string }
+  | { type: 'scroll'; t: number; x: number; y: number }
+  | { type: 'input'; t: number; target: string }
+  | { type: 'navigation'; t: number; url: string }
+  | { type: 'annotation'; t: number; points: [number, number][] };
+
 export interface FeedbackPayload {
   type: FeedbackType;
   message: string;
@@ -93,6 +114,8 @@ export interface FeedbackPayload {
   screenshot?: Blob;
   /** WebM/MP4 video, if the user attached a recording. */
   video?: Blob;
+  /** Mouse path, clicks, scrolling, navigation and drawings made during the recording. */
+  recordingEvents?: RecordingEvent[];
 }
 
 export interface FeedbackOptions {
@@ -110,7 +133,7 @@ export interface FeedbackOptions {
   onError?: (error: unknown) => void;
 
   pages?: PageRules;
-  /** Feedback types offered, in order. Default: all three. */
+  /** Feedback types offered, in order. Default `['feedback', 'bug', 'suggestion']`. */
   types?: FeedbackType[];
   features?: FeedbackFeatures;
   /** Screenshot method. `dom` renders the page silently; `display` uses the browser's screen-capture prompt (pixel-perfect). Default `dom`, falling back to `display`. */

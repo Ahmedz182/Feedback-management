@@ -154,7 +154,30 @@ textarea.fb-input { min-height: 110px; resize: vertical; }
 }
 .fb-dot { width: 10px; height: 10px; border-radius: 999px; background: #ef4444; animation: fb-blink 1s infinite; }
 @keyframes fb-blink { 50% { opacity: .3; } }
-.fb-recording .fb-btn { background: #ef4444; border-color: #ef4444; color: #fff; border-radius: 999px; }
+.fb-timer { min-width: 36px; }
+.fb-recording .fb-tool { color: #fafafa; width: 34px; height: 34px; padding: 7px; border-radius: 999px; }
+.fb-recording .fb-tool:hover { background: #3f3f46; }
+.fb-recording .fb-tool[aria-pressed="true"] { background: #ef4444; border-color: #ef4444; color: #fff; }
+.fb-recording .fb-stop { background: #ef4444; border-color: #ef4444; color: #fff; border-radius: 999px; }
+.fb-recording .fb-stop:hover:not(:disabled) { background: #dc2626; }
+
+.fb-overlay { position: fixed; inset: 0; pointer-events: none; }
+.fb-draw-layer { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; }
+.fb-draw-layer.fb-draw-active { pointer-events: auto; cursor: crosshair; touch-action: none; }
+.fb-cursor {
+  position: fixed; left: 0; top: 0;
+  width: 36px; height: 36px; margin: -18px 0 0 -18px;
+  border-radius: 999px;
+  background: rgba(250, 204, 21, .35); border: 2px solid rgba(234, 179, 8, .8);
+  pointer-events: none; will-change: transform;
+}
+.fb-ripple {
+  position: fixed; width: 40px; height: 40px; margin: -20px 0 0 -20px;
+  border-radius: 999px; border: 3px solid #ef4444;
+  pointer-events: none;
+  animation: fb-ripple .6s ease-out forwards;
+}
+@keyframes fb-ripple { from { transform: scale(.3); opacity: 1; } to { transform: scale(1.6); opacity: 0; } }
 
 .fb-annotate {
   position: fixed; inset: 0;

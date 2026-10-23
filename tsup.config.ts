@@ -15,6 +15,15 @@ export default defineConfig([
     banner: { js: "'use client';" },
   },
   {
+    // Server-side integrations (Slack, ClickUp, request handler). No 'use client' banner.
+    entry: { server: 'src/server/index.ts' },
+    format: ['esm', 'cjs'],
+    dts: true,
+    sourcemap: true,
+    target: 'node18',
+    platform: 'node',
+  },
+  {
     // <script> tag build for CDNs: exposes `window.FeedbackWidget`.
     entry: { 'feedback-widget': 'src/index.ts' },
     format: ['iife'],

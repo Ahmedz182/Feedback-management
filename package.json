@@ -1,7 +1,7 @@
 {
   "name": "feedback-management",
   "version": "0.1.0",
-  "description": "Drop-in feedback widget: collect bug reports, feedback and suggestions with annotated screenshots and screen recordings. Set up once, works across your whole app.",
+  "description": "Drop-in feedback widget: collect bug reports, feedback and suggestions with annotated screenshots and screen recordings (with drawing and mouse tracking), and send them to Slack or ClickUp. Set up once, works across your whole app.",
   "keywords": [
     "feedback",
     "bug-report",
@@ -9,7 +9,10 @@
     "screenshot",
     "screen-recording",
     "userback",
-    "react"
+    "react",
+    "slack",
+    "clickup",
+    "annotation"
   ],
   "license": "MIT",
   "author": "Ahmed Fayyaz",
@@ -42,6 +45,16 @@
       "require": {
         "types": "./dist/react.d.cts",
         "default": "./dist/react.cjs"
+      }
+    },
+    "./server": {
+      "import": {
+        "types": "./dist/server.d.ts",
+        "default": "./dist/server.js"
+      },
+      "require": {
+        "types": "./dist/server.d.cts",
+        "default": "./dist/server.cjs"
       }
     },
     "./package.json": "./package.json"

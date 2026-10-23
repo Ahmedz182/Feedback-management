@@ -1,6 +1,8 @@
 import { annotate } from './capture/annotate';
+import { RecordingOverlay } from './capture/overlay';
 import { startRecording, isRecordingSupported, type Recording } from './capture/recorder';
 import { captureDisplay, captureDom, isDisplayCaptureSupported } from './capture/screenshot';
+import { startSessionTracking } from './capture/session';
 import { collectContext, startConsoleCapture, type ConsoleCapture } from './context';
 import { isPageAllowed } from './pages';
 import { onRouteChange } from './route-watcher';
@@ -11,6 +13,7 @@ import type {
   FeedbackPayload,
   FeedbackType,
   FeedbackUser,
+  RecordingEvent,
 } from './types';
 import { h, icon, nextFrame } from './ui/dom';
 import { icons } from './ui/icons';
@@ -21,7 +24,7 @@ export const DEFAULT_LABELS: FeedbackLabels = {
   title: 'Send feedback',
   bug: 'Bug',
   feedback: 'Feedback',
-  suggestion: 'Idea',
+  suggestion: 'Suggestion',
   placeholderBug: 'What went wrong? Steps to reproduce help a lot.',
   placeholderFeedback: 'What do you think? We read everything.',
   placeholderSuggestion: 'What would make this better for you?',
@@ -29,6 +32,8 @@ export const DEFAULT_LABELS: FeedbackLabels = {
   screenshot: 'Screenshot',
   record: 'Record screen',
   stopRecording: 'Stop',
+  drawOnPage: 'Draw on the page',
+  clearDrawing: 'Clear drawings',
   remove: 'Remove',
   submit: 'Send',
   sending: 'Sending…',
@@ -43,7 +48,7 @@ export const DEFAULT_LABELS: FeedbackLabels = {
   annotateDone: 'Attach',
 };
 
-const ALL_TYPES: FeedbackType[] = ['bug', 'feedback', 'suggestion'];
+const ALL_TYPES: FeedbackType[] = ['feedback', 'bug', 'suggestion'];
 const TYPE_ICONS: Record<FeedbackType, string> = {
   bug: icons.bug,
   feedback: icons.feedback,
@@ -72,6 +77,8 @@ interface Elements {
   submit: HTMLButtonElement;
   recordingBar: HTMLElement;
   timer: HTMLElement;
+  drawButton: HTMLButtonElement | null;
+  clearButton: HTMLButtonElement | null;
 }
 
 export class FeedbackWidget {
@@ -84,6 +91,8 @@ export class FeedbackWidget {
   private type: FeedbackType;
   private screenshot: Blob | null = null;
   private video: Blob | null = null;
+  private recordingEvents: RecordingEvent[] | null = null;
+  private overlay: RecordingOverlay | null = null;
   private objectUrls: string[] = [];
   private recording: Recording | null = null;
   private capturing = false;
@@ -193,6 +202,7 @@ export class FeedbackWidget {
     if (this.destroyed) return;
     this.destroyed = true;
     this.recording?.stop();
+    this.overlay?.destroy();
     this.stopRouteWatch?.();
     this.consoleCapture?.stop();
     this.revokeObjectUrls();
@@ -259,7 +269,9 @@ export class FeedbackWidget {
   }
 
   private onKeyDown = (event: KeyboardEvent) => {
-    if (event.key === 'Escape' && this.isOpen && !this.capturing) this.close();
+    if (event.key !== 'Escape') return;
+    if (this.overlay?.isDrawing) this.toggleDrawing();
+    else if (this.isOpen && !this.capturing) this.close();
   };
 
   private setType(type: FeedbackType) {
@@ -286,6 +298,11 @@ export class FeedbackWidget {
     this.options.onError?.(error);
   }
 
+  private clearVideo() {
+    this.video = null;
+    this.recordingEvents = null;
+  }
+
   private revokeObjectUrls() {
     this.objectUrls.forEach((url) => URL.revokeObjectURL(url));
     this.objectUrls = [];
@@ -295,7 +312,7 @@ export class FeedbackWidget {
     if (!this.els) return;
     this.els.message.value = '';
     this.screenshot = null;
-    this.video = null;
+    this.clearVideo();
     this.renderPreviews();
     this.showError(null);
     this.els.form.hidden = false;
@@ -431,13 +448,29 @@ export class FeedbackWidget {
       success,
     );
 
-    const timer = h('span', {}, '0:00');
+    const timer = h('span', { class: 'fb-timer' }, '0:00');
+    const drawButton = this.feature('recordingDrawing')
+      ? h(
+          'button',
+          { type: 'button', class: 'fb-tool', title: l.drawOnPage, 'aria-label': l.drawOnPage, 'aria-pressed': 'false', onclick: () => this.toggleDrawing() },
+          icon(icons.pen),
+        )
+      : null;
+    const clearButton = drawButton
+      ? h(
+          'button',
+          { type: 'button', class: 'fb-tool', title: l.clearDrawing, 'aria-label': l.clearDrawing, onclick: () => this.overlay?.clear() },
+          icon(icons.eraser),
+        )
+      : null;
     const recordingBar = h(
       'div',
-      { class: 'fb-recording', hidden: true, role: 'status' },
+      { class: 'fb-recording', hidden: true, role: 'toolbar', 'aria-label': l.record },
       h('span', { class: 'fb-dot' }),
       timer,
-      h('button', { type: 'button', class: 'fb-btn', onclick: () => this.recording?.stop() }, l.stopRecording),
+      drawButton,
+      clearButton,
+      h('button', { type: 'button', class: 'fb-btn fb-stop', onclick: () => this.recording?.stop() }, l.stopRecording),
     );
 
     const style = h('style', {}, styles);
@@ -457,6 +490,8 @@ export class FeedbackWidget {
       submit,
       recordingBar,
       timer,
+      drawButton,
+      clearButton,
     };
     this.renderPreviews();
     this.updateSubmit();
@@ -498,7 +533,7 @@ export class FeedbackWidget {
           { class: 'fb-preview' },
           h('video', { src: url, muted: true, playsinline: true, preload: 'metadata', 'aria-label': this.labels.record }),
           removeButton(() => {
-            this.video = null;
+            this.clearVideo();
             this.renderPreviews();
           }),
         ),
@@ -553,15 +588,39 @@ export class FeedbackWidget {
         maxSeconds: this.options.maxRecordingSeconds ?? 120,
         onTick: (seconds) => (els.timer.textContent = formatSeconds(seconds)),
       });
+      const tracker = this.feature('interactionLog') ? startSessionTracking(this.host ?? undefined) : null;
+      if (this.root && (this.feature('cursorHighlight') || this.feature('recordingDrawing'))) {
+        this.overlay = new RecordingOverlay(this.root, {
+          cursor: this.feature('cursorHighlight'),
+          onStroke: (points) => tracker?.add({ type: 'annotation', points }),
+        });
+      }
       els.recordingBar.hidden = false;
-      const video = await this.recording.result;
-      if (video.size > 0) this.video = video;
+      try {
+        const video = await this.recording.result;
+        if (video.size > 0) {
+          this.video = video;
+          this.recordingEvents = tracker ? tracker.events() : null;
+        }
+      } finally {
+        tracker?.stop();
+      }
     } catch (error) {
       this.handleError(error);
     } finally {
       this.recording = null;
+      this.overlay?.destroy();
+      this.overlay = null;
+      this.els?.drawButton?.setAttribute('aria-pressed', 'false');
       this.finishCapture();
     }
+  }
+
+  private toggleDrawing() {
+    if (!this.overlay) return;
+    const on = !this.overlay.isDrawing;
+    this.overlay.setDrawing(on);
+    this.els?.drawButton?.setAttribute('aria-pressed', String(on));
   }
 
   private finishCapture() {
@@ -591,6 +650,7 @@ export class FeedbackWidget {
     if (this.consoleCapture) payload.consoleLogs = this.consoleCapture.entries();
     if (this.screenshot) payload.screenshot = this.screenshot;
     if (this.video) payload.video = this.video;
+    if (this.video && this.recordingEvents) payload.recordingEvents = this.recordingEvents;
     return payload;
   }
 
@@ -615,7 +675,7 @@ export class FeedbackWidget {
       this.els.success.hidden = false;
       this.els.message.value = '';
       this.screenshot = null;
-      this.video = null;
+      this.clearVideo();
       this.renderPreviews();
     } catch (error) {
       this.showError(this.labels.error);

@@ -38,7 +38,7 @@ export function isRecordingSupported(): boolean {
  */
 export async function startRecording(options: RecordingOptions): Promise<Recording> {
   const stream = await navigator.mediaDevices.getDisplayMedia({
-    video: { displaySurface: 'browser', frameRate: 30 },
+    video: { displaySurface: 'browser', frameRate: 30, cursor: 'always' },
     audio: true,
     preferCurrentTab: true,
     selfBrowserSurface: 'include',
