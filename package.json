@@ -69,6 +69,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "example": "npm run build && node examples/server/index.mjs",
+    "demo": "npm run build && node demo/serve.mjs",
     "prepublishOnly": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
@@ -92,5 +93,6 @@
     "tsup": "^9.0.0",
     "typescript": "^5.9.3",
     "vitest": "^5.0.5"
-  }
+  },
+  "homepage": "https://ahmedz182.github.io/Feedback-management/"
 }

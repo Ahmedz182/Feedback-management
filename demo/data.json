@@ -1,0 +1,7 @@
+{
+  "orders": [
+    { "id": 1, "customer": "Northwind Traders", "total": 1200 },
+    { "id": 2, "customer": "Globex Corporation", "total": 4800 },
+    { "id": 3, "customer": "Initech", "total": 49 }
+  ]
+}

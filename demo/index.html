@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Live demo · feedback-management</title>
+    <meta name="description" content="Try the feedback-management widget: report bugs, feedback and suggestions with screenshots, screen recordings, console logs and API calls." />
+    <style>
+      :root {
+        --bg: #f8fafc; --card: #ffffff; --text: #0f172a; --muted: #64748b; --border: #e2e8f0;
+        --accent: #4f46e5; --ok: #16a34a; --bad: #dc2626; --warn: #ca8a04; --code: #f1f5f9;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme="light"]) {
+          --bg: #0b1120; --card: #111827; --text: #e5e7eb; --muted: #94a3b8; --border: #1f2937;
+          --code: #0f172a; --ok: #4ade80; --bad: #f87171; --warn: #facc15;
+        }
+      }
+      :root[data-theme="dark"] {
+        --bg: #0b1120; --card: #111827; --text: #e5e7eb; --muted: #94a3b8; --border: #1f2937;
+        --code: #0f172a; --ok: #4ade80; --bad: #f87171; --warn: #facc15;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+      header { padding: 28px 24px 8px; max-width: 1200px; margin: 0 auto; }
+      header h1 { margin: 0; font-size: 26px; }
+      header p { margin: 6px 0 0; color: var(--muted); max-width: 760px; }
+      header a { color: var(--accent); }
+      main { max-width: 1200px; margin: 0 auto; padding: 16px 24px 96px; display: grid; gap: 20px; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); }
+      @media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); } }
+      section.card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 20px; }
+      h2 { font-size: 16px; margin: 0 0 4px; }
+      .hint { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
+      .group { margin-bottom: 18px; }
+      .group h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 8px; }
+      .buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+      button.btn { font: inherit; font-size: 14px; padding: 7px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--text); cursor: pointer; }
+      button.btn:hover { border-color: var(--accent); }
+      button.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+      nav.routes { display: flex; gap: 6px; flex-wrap: wrap; }
+      nav.routes a { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border); color: var(--text); text-decoration: none; font-size: 14px; }
+      nav.routes a[aria-current="page"] { background: var(--text); color: var(--bg); border-color: var(--text); }
+      .route-note { font-size: 13px; color: var(--muted); margin-top: 8px; min-height: 20px; }
+      label.field { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+      .settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+      select, input[type="text"], input[type="color"] { font: inherit; font-size: 14px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--text); width: 100%; }
+      input[type="color"] { padding: 2px; height: 36px; }
+      .empty { text-align: center; color: var(--muted); padding: 48px 16px; border: 2px dashed var(--border); border-radius: 12px; }
+      .empty strong { display: block; color: var(--text); font-size: 16px; margin-bottom: 4px; }
+      .summary { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; margin-bottom: 12px; }
+      .badge { font-size: 12px; font-weight: 600; padding: 2px 10px; border-radius: 999px; background: var(--code); }
+      .message { white-space: pre-wrap; background: var(--code); border-radius: 10px; padding: 10px 12px; margin: 0 0 14px; }
+      .media { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-bottom: 14px; }
+      .media img, .media video { width: 100%; border-radius: 10px; border: 1px solid var(--border); background: #000; }
+      details { border: 1px solid var(--border); border-radius: 10px; margin-bottom: 8px; }
+      details > summary { cursor: pointer; padding: 9px 12px; font-weight: 600; font-size: 14px; display: flex; justify-content: space-between; gap: 8px; }
+      details > summary .count { color: var(--muted); font-weight: 500; }
+      .rows { padding: 0 12px 10px; display: grid; gap: 4px; max-height: 280px; overflow: auto; }
+      .row { font: 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 4px 8px; border-radius: 6px; background: var(--code); overflow-wrap: anywhere; }
+      .row .lvl-error, .row .bad { color: var(--bad); font-weight: 600; }
+      .row .lvl-warn { color: var(--warn); font-weight: 600; }
+      .row .ok { color: var(--ok); font-weight: 600; }
+      .row .muted { color: var(--muted); }
+      pre.json { margin: 0 12px 10px; padding: 10px; background: var(--code); border-radius: 8px; font-size: 12px; max-height: 360px; overflow: auto; }
+      code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .9em; background: var(--code); padding: 1px 5px; border-radius: 5px; }
+      .steps { margin: 0; padding: 0 12px 10px 34px; font-size: 13.5px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>feedback-management · live demo</h1>
+      <p>
+        Do a few things on this page, then click the <strong>Feedback</strong> button (bottom-right) to send a report.
+        This demo has no backend: the report is shown on the right exactly as your <code>endpoint</code> or
+        <code>onSubmit</code> would receive it. <a href="https://github.com/Ahmedz182/Feedback-management#readme">Docs &amp; setup →</a>
+      </p>
+    </header>
+
+    <main>
+      <section class="card" aria-labelledby="play-title">
+        <h2 id="play-title">1 · Generate some activity</h2>
+        <p class="hint">Everything you do here is captured and attached to the report.</p>
+
+        <div class="group">
+          <h3>Routes (single-page app)</h3>
+          <nav class="routes" aria-label="Demo routes">
+            <a href="#/dashboard">Dashboard</a>
+            <a href="#/settings?tab=billing">Settings</a>
+            <a href="#/checkout">Checkout</a>
+          </nav>
+          <p class="route-note" id="route-note"></p>
+        </div>
+
+        <div class="group">
+          <h3>Console</h3>
+          <div class="buttons">
+            <button class="btn" id="log-info">console.info</button>
+            <button class="btn" id="log-warn">console.warn</button>
+            <button class="btn" id="log-error">console.error</button>
+            <button class="btn" id="log-throw">Throw uncaught error</button>
+          </div>
+        </div>
+
+        <div class="group">
+          <h3>API calls</h3>
+          <div class="buttons">
+            <button class="btn" id="api-ok">fetch → 200</button>
+            <button class="btn" id="api-fail">fetch → 404</button>
+            <button class="btn" id="api-xhr">XHR → 200</button>
+            <button class="btn" id="api-secret">POST with password</button>
+          </div>
+          <p class="hint" style="margin-top:8px">Secrets in URLs and bodies are redacted before they leave the browser.</p>
+        </div>
+
+        <div class="group">
+          <h3>Open the widget from your own UI</h3>
+          <div class="buttons">
+            <button class="btn primary" data-open="bug">Report a bug</button>
+            <button class="btn" data-open="feedback">Give feedback</button>
+            <button class="btn" data-open="suggestion">Suggest something</button>
+          </div>
+        </div>
+
+        <div class="group" style="margin-bottom:0">
+          <h3>Widget options (applied live with <code>update()</code>)</h3>
+          <div class="settings">
+            <label class="field">Preset
+              <select id="opt-preset">
+                <option value="default">Default</option>
+                <option value="warm">Warm paper</option>
+                <option value="midnight">Midnight</option>
+                <option value="brand">Brand green, square</option>
+              </select>
+            </label>
+            <label class="field">Launcher
+              <select id="opt-launcher">
+                <option value="pill">pill</option>
+                <option value="circle">circle</option>
+                <option value="tab">tab (side edge)</option>
+              </select>
+            </label>
+            <label class="field">Theme
+              <select id="opt-theme">
+                <option value="auto">auto</option>
+                <option value="light">light</option>
+                <option value="dark">dark</option>
+              </select>
+            </label>
+            <label class="field">Position
+              <select id="opt-position">
+                <option>bottom-right</option>
+                <option>bottom-left</option>
+                <option>top-right</option>
+                <option>top-left</option>
+              </select>
+            </label>
+            <label class="field">Color
+              <input type="color" id="opt-color" value="#4f46e5" />
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="report-title" aria-live="polite">
+        <h2 id="report-title">2 · What the report contains</h2>
+        <p class="hint">Send a report with the widget and it appears here.</p>
+        <div id="report">
+          <div class="empty">
+            <strong>No report yet</strong>
+            Click <em>Feedback</em> in the corner, add a screenshot or a recording, and send.
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script src="./feedback-widget.global.js"></script>
+    <script>
+      // ------------------------------------------------------------------ widget
+      const widget = FeedbackWidget.init({
+        user: { id: 'demo-42', name: 'Demo User' },
+        metadata: { appVersion: '1.0.0', plan: 'demo' },
+        // Hidden on #/checkout: a function rule, re-checked on every route change.
+        pages: { exclude: [(url) => url.hash.startsWith('#/checkout')] },
+        capture: { networkBodies: true },
+        // "Where in the app?" is preselected from the current route.
+        areas: [
+          { label: 'Dashboard', match: (url) => url.hash.startsWith('#/dashboard') },
+          { label: 'Settings', match: (url) => url.hash.startsWith('#/settings') },
+          'Reports',
+        ],
+        fields: { component: true, tags: ['orders', 'billing', 'search', 'exports', 'notifications', 'other'] },
+        theme: 'auto',
+        async onSubmit(payload) {
+          await new Promise((resolve) => setTimeout(resolve, 400)); // feel of a real request
+          renderReport(payload);
+          setTimeout(() => widget.close(), 1500); // let the report on the right be seen
+        },
+      });
+
+      document.querySelectorAll('[data-open]').forEach((button) =>
+        button.addEventListener('click', () => widget.open(button.dataset.open)),
+      );
+      const option = (id, key, map = (v) => v) =>
+        document.getElementById(id).addEventListener('input', (e) => widget.update({ [key]: map(e.target.value) }));
+      option('opt-theme', 'theme');
+      option('opt-position', 'position');
+      option('opt-color', 'primaryColor');
+
+      // Appearance presets: the same widget, matched to very different sites.
+      const presets = {
+        default: {},
+        warm: {
+          primary: '#1c1917', background: '#fffdf8', surface: '#f8f4ec', border: '#e9e1d3', muted: '#8a7f70',
+          bug: '#e11d48', suggestion: '#b45309', radius: '8px', font: 'inherit',
+        },
+        midnight: {
+          primary: '#a78bfa', primaryText: '#0b0b1a', background: '#0f1024', surface: '#17183a', text: '#e7e7ff',
+          muted: '#9a9ac8', border: '#2b2d5c', bug: '#fb7185', feedback: '#a78bfa', suggestion: '#fbbf24',
+          radius: '14px', shadow: '0 20px 60px rgba(0,0,0,.55)',
+        },
+        brand: {
+          primary: '#047857', bug: '#b91c1c', feedback: '#047857', suggestion: '#0369a1',
+          radius: '0', font: 'Georgia, serif', panelWidth: '500px',
+        },
+      };
+      const launcherSelect = document.getElementById('opt-launcher');
+      const presetSelect = document.getElementById('opt-preset');
+      const applyAppearance = () =>
+        widget.update({ appearance: { ...presets[presetSelect.value], launcher: launcherSelect.value } });
+      presetSelect.addEventListener('input', applyAppearance);
+      launcherSelect.addEventListener('input', applyAppearance);
+      document.getElementById('opt-theme').addEventListener('input', (e) => {
+        document.documentElement.dataset.theme = e.target.value === 'auto' ? '' : e.target.value;
+      });
+
+      // ---------------------------------------------------------------- activity
+      const on = (id, fn) => document.getElementById(id).addEventListener('click', fn);
+      on('log-info', () => console.info('Loaded 24 orders for', location.hash || '#/dashboard'));
+      on('log-warn', () => console.warn('Slow response from /api/orders (2.4s)'));
+      on('log-error', () => console.error(new Error('Cannot read properties of undefined (reading "total")')));
+      on('log-throw', () => setTimeout(() => { throw new Error('Uncaught: checkout total is NaN'); }));
+      on('api-ok', () => fetch('./data.json?page=1').then((r) => r.json()).then((d) => console.log('orders', d.orders.length)));
+      on('api-fail', () => fetch('./api/orders/42').catch(() => {}));
+      on('api-xhr', () => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('GET', './data.json?via=xhr');
+        xhr.send();
+      });
+      on('api-secret', () =>
+        fetch('./api/login?token=abc123', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: 'demo@example.com', password: 'hunter2' }),
+        }).catch(() => {}),
+      );
+
+      // ------------------------------------------------------------- hash router
+      const notes = {
+        '#/dashboard': 'Widget visible.',
+        '#/settings': 'Widget visible. The query (?tab=billing) is captured with every click.',
+        '#/checkout': 'Widget hidden here by a pages.exclude rule. Go back to see it again.',
+      };
+      function renderRoute() {
+        if (!location.hash) history.replaceState(null, '', '#/dashboard');
+        const route = location.hash.split('?')[0];
+        document.querySelectorAll('nav.routes a').forEach((a) => {
+          if (a.getAttribute('href').split('?')[0] === route) a.setAttribute('aria-current', 'page');
+          else a.removeAttribute('aria-current');
+        });
+        document.getElementById('route-note').textContent = `Route ${location.hash}: ${notes[route] ?? ''}`;
+        document.title = `${route.slice(2).replace(/^./, (c) => c.toUpperCase())} · feedback-management demo`;
+      }
+      window.addEventListener('hashchange', renderRoute);
+      renderRoute();
+
+      // ----------------------------------------------------------- report viewer
+      function el(tag, attrs = {}, ...children) {
+        const node = document.createElement(tag);
+        for (const [k, v] of Object.entries(attrs)) {
+          if (k === 'class') node.className = v;
+          else node.setAttribute(k, v);
+        }
+        node.append(...children.filter((c) => c !== null && c !== undefined));
+        return node;
+      }
+      const span = (cls, text) => el('span', { class: cls }, text);
+      const time = (iso) => iso.slice(11, 19);
+      const seconds = (ms) => `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`;
+
+      function section(title, count, body, open = false) {
+        const details = el('details', open ? { open: '' } : {}, el('summary', {}, title, span('count', String(count))), body);
+        return details;
+      }
+      function rows(items, render) {
+        const box = el('div', { class: 'rows' });
+        if (!items.length) box.append(el('div', { class: 'row' }, span('muted', 'Nothing captured')));
+        items.forEach((item) => box.append(el('div', { class: 'row' }, ...render(item))));
+        return box;
+      }
+
+      function renderReport(payload) {
+        const { screenshot, video, attachments, ...json } = payload;
+        const root = document.getElementById('report');
+        root.replaceChildren();
+
+        const labels = { bug: '🐞 Bug', feedback: '💬 Feedback', suggestion: '💡 Suggestion' };
+        const facts = [
+          payload.severity && `${payload.type === 'bug' ? 'Severity' : 'Priority'}: ${payload.severity}`,
+          payload.area && `Area: ${payload.area}`,
+          payload.component && `Component: ${payload.component}`,
+          payload.tags?.length && `Tags: ${payload.tags.join(', ')}`,
+          payload.sentiment && `Feeling: ${payload.sentiment}`,
+          payload.anonymous ? 'Anonymous' : payload.user && `From: ${payload.user.name}`,
+        ].filter(Boolean);
+        root.append(
+          el('div', { class: 'summary' },
+            el('span', { class: 'badge' }, labels[payload.type]),
+            el('strong', {}, payload.title),
+          ),
+          el('div', { class: 'summary' }, ...facts.map((f) => el('span', { class: 'badge' }, f))),
+          el('p', { class: 'message' }, payload.message),
+        );
+        if (payload.expected || payload.actual) {
+          root.append(el('p', { class: 'message' }, `Expected: ${payload.expected || '—'}\nActual: ${payload.actual || '—'}`));
+        }
+        if (payload.checklist?.length) {
+          root.append(el('p', { class: 'message' }, payload.checklist.map((c) => `${c.checked ? '☑' : '☐'} ${c.label}`).join('\n')));
+        }
+
+        const files = payload.attachments ?? [];
+        if (screenshot || video || files.length) {
+          const media = el('div', { class: 'media' });
+          if (screenshot) media.append(el('img', { src: URL.createObjectURL(screenshot), alt: 'Attached screenshot' }));
+          if (video) media.append(el('video', { src: URL.createObjectURL(video), controls: '', playsinline: '' }));
+          files.forEach((file) =>
+            media.append(file.type.startsWith('video/')
+              ? el('video', { src: URL.createObjectURL(file), controls: '', playsinline: '' })
+              : el('img', { src: URL.createObjectURL(file), alt: file.name })),
+          );
+          root.append(media);
+        }
+
+        const crumbs = payload.breadcrumbs ?? [];
+        root.append(section('User actions (clicks & page changes)', crumbs.length, rows(crumbs.slice().reverse(), (c) => [
+          span('muted', `${time(c.timestamp)} `),
+          c.type === 'click' ? `Clicked ${c.text ? `"${c.text}" ` : ''}(${c.target}) on ` : 'Opened ',
+          el('strong', {}, c.path), span('muted', ` · ${c.title}`),
+        ]), true));
+
+        const steps = (payload.recordingEvents ?? []).filter((e) => e.type !== 'pointer');
+        if (payload.recordingEvents) {
+          const list = el('ol', { class: 'steps' });
+          steps.forEach((e) => list.append(el('li', {},
+            span('muted', `${seconds(e.t)} `),
+            e.type === 'click' ? `Clicked ${e.text ? `"${e.text}" ` : ''}(${e.target}) on ${e.path}`
+              : e.type === 'navigation' ? `Page ${e.url}`
+              : e.type === 'annotation' ? 'Drew on the page'
+              : e.type === 'scroll' ? `Scrolled to y=${e.y}` : `Changed ${e.target}`,
+          )));
+          const moves = payload.recordingEvents.length - steps.length;
+          root.append(section('Recording timeline', `${steps.length} steps · ${moves} mouse points`, list, true));
+        }
+
+        const logs = payload.consoleLogs ?? [];
+        root.append(section('Console', logs.length, rows(logs.slice().reverse(), (l) => [
+          span('muted', `${time(l.timestamp)} `), span(`lvl-${l.level}`, l.level.toUpperCase()), ` ${l.message}`,
+        ]), logs.some((l) => l.level === 'error')));
+
+        const calls = payload.networkLogs ?? [];
+        root.append(section('API calls', calls.length, rows(calls.slice().reverse(), (c) => [
+          span(c.ok ? 'ok' : 'bad', c.status ? String(c.status) : 'ERR'), ` ${c.method} ${c.url} `,
+          span('muted', `${c.duration} ms${c.requestBody ? ` · body ${c.requestBody}` : ''}${c.error ? ` · ${c.error}` : ''}`),
+        ]), calls.some((c) => !c.ok)));
+
+        root.append(section('Context', payload.context.url, el('pre', { class: 'json' }, JSON.stringify(payload.context, null, 2))));
+        root.append(section('Raw payload (JSON)', 'as sent to your endpoint', el('pre', { class: 'json' }, JSON.stringify(json, null, 2))));
+        root.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    </script>
+  </body>
+</html>
