@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Feedback widget demo</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 0; background: #f8fafc; color: #0f172a; }
+      nav { display: flex; gap: 16px; padding: 16px 24px; background: #0f172a; }
+      nav a { color: #e2e8f0; text-decoration: none; }
+      main { max-width: 720px; margin: 40px auto; padding: 0 24px; }
+      .card { background: #fff; border-radius: 12px; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+      button.demo { padding: 8px 14px; border-radius: 8px; border: 1px solid #cbd5e1; background: #fff; cursor: pointer; }
+    </style>
+  </head>
+  <body>
+    <nav>
+      <a href="/" data-link>Home</a>
+      <a href="/dashboard" data-link>Dashboard</a>
+      <a href="/checkout" data-link>Checkout (widget hidden)</a>
+    </nav>
+    <main>
+      <div class="card">
+        <h1 id="title">Home</h1>
+        <p>This is a tiny single-page app. Navigate with the links above; the widget follows the route
+          and hides itself on <code>/checkout</code>.</p>
+        <p><button class="demo" id="report-bug">Report a bug (custom trigger)</button></p>
+      </div>
+    </main>
+
+    <script src="/feedback-widget.global.js"></script>
+    <script>
+      // One-time setup: the widget now works on every page of the app.
+      FeedbackWidget.init({
+        endpoint: '/api/feedback',
+        user: { id: 'demo-user', name: 'Demo User' },
+        metadata: { appVersion: '1.0.0' },
+        pages: { exclude: ['/checkout'] },
+        primaryColor: '#4f46e5',
+        theme: 'auto',
+      });
+
+      document.getElementById('report-bug').addEventListener('click', () => FeedbackWidget.open('bug'));
+
+      // Minimal client-side router, standing in for React Router / Vue Router / Next.js.
+      function render() {
+        document.getElementById('title').textContent =
+          { '/': 'Home', '/dashboard': 'Dashboard', '/checkout': 'Checkout' }[location.pathname] ?? 'Not found';
+      }
+      document.addEventListener('click', (event) => {
+        const link = event.target.closest('a[data-link]');
+        if (!link) return;
+        event.preventDefault();
+        history.pushState({}, '', link.getAttribute('href'));
+        render();
+      });
+      window.addEventListener('popstate', render);
+      render();
+    </script>
+  </body>
+</html>

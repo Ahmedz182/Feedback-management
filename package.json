@@ -1,0 +1,83 @@
+{
+  "name": "feedback-management",
+  "version": "0.1.0",
+  "description": "Drop-in feedback widget: collect bug reports, feedback and suggestions with annotated screenshots and screen recordings. Set up once, works across your whole app.",
+  "keywords": [
+    "feedback",
+    "bug-report",
+    "widget",
+    "screenshot",
+    "screen-recording",
+    "userback",
+    "react"
+  ],
+  "license": "MIT",
+  "author": "Ahmed Fayyaz",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ahmedz182/Feedback-management.git"
+  },
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "unpkg": "./dist/feedback-widget.global.js",
+  "jsdelivr": "./dist/feedback-widget.global.js",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./react": {
+      "import": {
+        "types": "./dist/react.d.ts",
+        "default": "./dist/react.js"
+      },
+      "require": {
+        "types": "./dist/react.d.cts",
+        "default": "./dist/react.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "example": "npm run build && node examples/server/index.mjs",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
+  },
+  "dependencies": {
+    "html-to-image": "^1.11.13"
+  },
+  "peerDependencies": {
+    "react": ">=17"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.3.3",
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "jsdom": "^29.1.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "tsup": "^9.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.5"
+  }
+}
